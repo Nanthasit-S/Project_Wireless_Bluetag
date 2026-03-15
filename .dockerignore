@@ -1,0 +1,13 @@
+node_modules
+backend/node_modules
+dist
+backend/dist
+.expo
+.git
+*.log
+web.log
+web-run.log
+web-run.err.log
+frontend-run.log
+frontend-run.err.log
+backend/*.log

@@ -1,0 +1,198 @@
+import type { FastifyError } from 'fastify';
+import type { AppConfig } from '../config/AppConfig';
+import { TagRepository } from '../repositories/TagRepository';
+import type { TagLocationRecord, TagWriteDecision, TagWriteInput } from '../types/domain';
+import { haversineMeters } from '../utils/geo';
+import { nowIso, parseOptionalNumber } from '../utils/parsers';
+
+function createHttpError(statusCode: number, message: string): FastifyError {
+  const error = new Error(message) as FastifyError;
+  error.statusCode = statusCode;
+  return error;
+}
+
+function toTagResponseRow(row: TagLocationRecord) {
+  const updatedAt =
+    typeof row.updated_at === 'string'
+      ? row.updated_at
+      : new Date(row.updated_at as unknown as string | number | Date).toISOString();
+
+  return {
+    tag_id: row.tag_id,
+    estimated_latitude: row.estimated_latitude == null ? null : Number(row.estimated_latitude),
+    estimated_longitude: row.estimated_longitude == null ? null : Number(row.estimated_longitude),
+    estimate_source: row.estimate_source,
+    updated_at: updatedAt,
+  };
+}
+
+export class TagService {
+  private readonly tagByIdCache = new Map<string, TagLocationRecord>();
+  private tagsListCache: { rows: TagLocationRecord[]; at: number } = { rows: [], at: 0 };
+
+  public constructor(
+    private readonly config: AppConfig,
+    private readonly tags: TagRepository,
+  ) {}
+
+  public async listTags() {
+    const age = Date.now() - this.tagsListCache.at;
+    if (this.tagsListCache.rows.length > 0 && age < this.config.tagsCacheTtlMs) {
+      return this.tagsListCache.rows.map(toTagResponseRow);
+    }
+
+    const rows = await this.tags.listRecent(this.config.tagsListLimit);
+    this.tagsListCache = { rows, at: Date.now() };
+    return rows.map(toTagResponseRow);
+  }
+
+  public async getCachedOrFetch(tagId: string): Promise<TagLocationRecord | null> {
+    const cached = this.tagByIdCache.get(tagId);
+    if (cached) {
+      return cached;
+    }
+
+    const row = await this.tags.findByTagId(tagId);
+    if (row) {
+      this.tagByIdCache.set(tagId, row);
+    }
+
+    return row;
+  }
+
+  public shouldWriteTag(existing: TagLocationRecord | null, incoming: TagWriteInput): TagWriteDecision {
+    if (!existing) {
+      return { write: true, reason: 'new' };
+    }
+
+    const ageMs = Date.now() - (Date.parse(existing.updated_at || '0') || 0);
+    if ((existing.estimate_source || '') !== (incoming.estimate_source || '')) {
+      return { write: true, reason: 'source_changed' };
+    }
+
+    const prevLat = parseOptionalNumber(existing.estimated_latitude);
+    const prevLng = parseOptionalNumber(existing.estimated_longitude);
+    const nextLat = parseOptionalNumber(incoming.estimated_latitude);
+    const nextLng = parseOptionalNumber(incoming.estimated_longitude);
+
+    if (prevLat == null || prevLng == null || nextLat == null || nextLng == null) {
+      if (ageMs >= this.config.tagWriteMinIntervalMs) {
+        return { write: true, reason: 'interval_elapsed' };
+      }
+
+      return { write: false, reason: 'throttled_no_coords' };
+    }
+
+    if (haversineMeters(prevLat, prevLng, nextLat, nextLng) >= this.config.tagMoveMinMeters) {
+      return { write: true, reason: 'moved' };
+    }
+
+    if (ageMs >= this.config.tagWriteMinIntervalMs) {
+      return { write: true, reason: 'interval_elapsed' };
+    }
+
+    return { write: false, reason: 'throttled' };
+  }
+
+  public async storeTagLocation(params: {
+    tagId: string;
+    estimatedLatitude: number | null;
+    estimatedLongitude: number | null;
+    estimateSource: string;
+    ownerUserId: string;
+  }): Promise<
+    | {
+        statusCode: 200;
+        body:
+          | {
+              stored: false;
+              reason: 'throttled_no_coords' | 'throttled';
+              cached: ReturnType<typeof toTagResponseRow> | null;
+            }
+          | {
+              stored: true;
+              reason: 'source_changed' | 'interval_elapsed' | 'moved';
+              tag: ReturnType<typeof toTagResponseRow>;
+              sample_count: number;
+            };
+      }
+    | {
+        statusCode: 201;
+        body: {
+          stored: true;
+          reason: 'new';
+          tag: ReturnType<typeof toTagResponseRow>;
+          sample_count: number;
+        };
+      }
+  > {
+    if (!params.tagId) {
+      throw createHttpError(400, 'tag_id is required');
+    }
+
+    const existing = await this.getCachedOrFetch(params.tagId);
+    const incoming: TagWriteInput = {
+      tag_id: params.tagId,
+      estimated_latitude: params.estimatedLatitude,
+      estimated_longitude: params.estimatedLongitude,
+      estimate_source: params.estimateSource,
+    };
+    const decision = this.shouldWriteTag(existing, incoming);
+
+    if (!decision.write) {
+      return {
+        statusCode: 200 as const,
+        body: {
+          stored: false,
+          reason: decision.reason as 'throttled_no_coords' | 'throttled',
+          cached: existing ? toTagResponseRow(existing) : null,
+        },
+      };
+    }
+
+    const row = await this.tags.upsertTagLocation({
+      tagId: params.tagId,
+      estimatedLatitude: params.estimatedLatitude,
+      estimatedLongitude: params.estimatedLongitude,
+      estimateSource: params.estimateSource,
+      updatedAt: nowIso(),
+      ownerUserId: params.ownerUserId,
+      sampleCount: Number(existing?.sample_count || 0) + 1,
+    });
+
+    await this.tags.insertLocationHistory({
+      tagId: params.tagId,
+      estimatedLatitude: params.estimatedLatitude,
+      estimatedLongitude: params.estimatedLongitude,
+      estimateSource: params.estimateSource,
+      recordedAt: row.updated_at,
+      ownerUserId: params.ownerUserId,
+      writeReason: decision.reason,
+    });
+
+    this.tagByIdCache.set(params.tagId, row);
+    this.tagsListCache.at = 0;
+
+    if (existing) {
+      return {
+        statusCode: 200 as const,
+        body: {
+          stored: true,
+          reason: decision.reason as 'source_changed' | 'interval_elapsed' | 'moved',
+          tag: toTagResponseRow(row),
+          sample_count: Number(row.sample_count || 0),
+        },
+      };
+    }
+
+    return {
+      statusCode: 201 as const,
+      body: {
+        stored: true,
+        reason: 'new' as const,
+        tag: toTagResponseRow(row),
+        sample_count: Number(row.sample_count || 0),
+      },
+    };
+  }
+}

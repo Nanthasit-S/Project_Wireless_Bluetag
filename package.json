@@ -1,0 +1,47 @@
+{
+  "name": "bluetag_mobile",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "build": "expo export --platform web",
+    "build:web": "expo export --platform web",
+    "sync:expo": "npx expo install --fix",
+    "use:devbuild": "node scripts/switch-version.mjs devbuild",
+    "use:expo-go": "node scripts/switch-version.mjs expo-go",
+    "backend:dev": "npm --prefix backend run dev",
+    "backend:start": "npm --prefix backend run start",
+    "test": "vitest run",
+    "smoke:e2e": "python scripts/e2e-smoke.py",
+    "smoke:cleanup": "python scripts/cleanup-smoke.py"
+  },
+  "dependencies": {
+    "@expo-google-fonts/sarabun": "^0.4.1",
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "buffer": "^6.0.3",
+    "expo": "~55.0.4",
+    "expo-blur": "~55.0.9",
+    "expo-location": "~55.1.2",
+    "expo-status-bar": "~55.0.4",
+    "nativewind": "^4.2.2",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-native": "0.83.2",
+    "react-native-ble-plx": "^3.5.1",
+    "react-native-maps": "1.26.20",
+    "react-native-web": "^0.21.0",
+    "react-native-webview": "13.16.0",
+    "tailwindcss": "^3.4.19"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "~19.2.10",
+    "jsdom": "^26.1.0",
+    "vitest": "^3.2.4",
+    "typescript": "~5.9.2"
+  },
+  "private": true
+}
