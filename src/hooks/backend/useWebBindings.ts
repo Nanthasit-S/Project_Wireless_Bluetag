@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { TagBindingRecord, WebIdRecord, WebIdTagOverview } from '../../types/bluetag';
+import type { TagBindingAccessRecord, TagBindingRecord, WebIdRecord, WebIdTagOverview } from '../../types/bluetag';
 
 interface UseWebBindingsParams {
   authToken: string;
@@ -161,6 +161,18 @@ export function useWebBindings({
   }, [authToken, backendBase, selectedWebId]);
 
   useEffect(() => {
+    if (!authToken || !selectedWebId) return;
+
+    const timer = setInterval(() => {
+      void loadSelectedWebIdOverview(selectedWebId).catch(() => {
+        setMessage('โหลดข้อมูลตำแหน่งของรหัสเชื่อมต่อไม่สำเร็จ');
+      });
+    }, 8000);
+
+    return () => clearInterval(timer);
+  }, [authToken, backendBase, selectedWebId]);
+
+  useEffect(() => {
     void loadBindingsData({ preserveSelection: true }).catch(() => {
       setMessage('โหลดข้อมูลรหัสเชื่อมต่อไม่สำเร็จ');
     });
@@ -205,6 +217,22 @@ export function useWebBindings({
     } catch {
       setMessage('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
       return false;
+    }
+  }
+
+  async function checkTagAccess(tagId: string) {
+    try {
+      const res = await authorizedFetch(`${backendBase.trim()}/api/bindings/${encodeURIComponent(tagId)}/access`);
+      if (res.status === 401) {
+        await onUnauthorized();
+        return null;
+      }
+      if (!res.ok) {
+        return null;
+      }
+      return (await res.json()) as TagBindingAccessRecord;
+    } catch {
+      return null;
     }
   }
 
@@ -257,10 +285,35 @@ export function useWebBindings({
     }
   }
 
+  async function handleFactoryResetTag(tagId: string) {
+    try {
+      const res = await authorizedFetch(`${backendBase.trim()}/api/bindings/${encodeURIComponent(tagId)}/factory-reset`, {
+        method: 'POST',
+      });
+      const data = (await res.json().catch(() => null)) as { message?: string } | null;
+      if (res.status === 401) {
+        await onUnauthorized();
+        return false;
+      }
+      if (!res.ok) {
+        setMessage(data?.message ?? 'factory reset ไม่สำเร็จ');
+        return false;
+      }
+      await loadBindingsData({ preserveSelection: true });
+      await loadSelectedWebIdOverview(selectedWebId);
+      setMessage(`factory reset ${tagId} แล้ว`);
+      return true;
+    } catch {
+      setMessage('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
+      return false;
+    }
+  }
+
   return {
     selectedWebId,
     tagBindings,
     selectedWebIdOverview,
+    checkTagAccess,
     setSelectedWebId,
     loadBindingsData,
     loadSelectedWebIdOverview,
@@ -268,5 +321,6 @@ export function useWebBindings({
     handleUnassignTag,
     handleSyncBoardState,
     handleTechnicianResetTag,
+    handleFactoryResetTag,
   };
 }

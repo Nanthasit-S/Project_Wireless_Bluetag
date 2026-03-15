@@ -2,6 +2,11 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -19,6 +24,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       db:
         condition: service_healthy
@@ -34,6 +45,7 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       TAG_WRITE_MIN_INTERVAL_MS: ${TAG_WRITE_MIN_INTERVAL_MS:-15000}
       TAG_MOVE_MIN_METERS: ${TAG_MOVE_MIN_METERS:-30}
+      TAG_SAME_LOCATION_WRITE_INTERVAL_MS: ${TAG_SAME_LOCATION_WRITE_INTERVAL_MS:-300000}
       TAGS_CACHE_TTL_MS: ${TAGS_CACHE_TTL_MS:-5000}
       TAGS_LIST_LIMIT: ${TAGS_LIST_LIMIT:-300}
       TAG_RETENTION_DAYS: ${TAG_RETENTION_DAYS:-30}
@@ -47,6 +59,12 @@ services:
         EXPO_PUBLIC_BACKEND_BASE_URL: ${EXPO_PUBLIC_BACKEND_BASE_URL}
         EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY:-}
     restart: unless-stopped
+    init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       - api
     ports:

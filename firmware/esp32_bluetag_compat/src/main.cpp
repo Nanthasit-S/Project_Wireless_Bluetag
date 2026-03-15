@@ -37,6 +37,11 @@ void handleSerialCommand(String command) {
     return;
   }
 
+  if (command == "REFRESH" || command == "RECONNECT" || command == "FLUSH") {
+    gBle.refreshRuntimeState(&Serial);
+    return;
+  }
+
   if (command.startsWith("BIND ")) {
     String webId = command.substring(5);
     String resolvedWebId;
@@ -65,6 +70,29 @@ void handleSerialCommand(String command) {
     String clearedHash;
     gBle.technicianReset(&clearedHash);
     Serial.printf("TECH_RESET_OK=%s\n", clearedHash.c_str());
+    return;
+  }
+
+  if (command == "SLEEP ON") {
+    if (gBle.setSleepModeEnabled(true)) {
+      Serial.println("SLEEP_MODE=ON");
+    } else {
+      Serial.println("SLEEP_MODE_ERROR");
+    }
+    return;
+  }
+
+  if (command == "SLEEP OFF") {
+    if (gBle.setSleepModeEnabled(false)) {
+      Serial.println("SLEEP_MODE=OFF");
+    } else {
+      Serial.println("SLEEP_MODE_ERROR");
+    }
+    return;
+  }
+
+  if (command == "SLEEP" || command == "SLEEP STATUS") {
+    Serial.printf("SLEEP_MODE=%s\n", gBle.isSleepModeEnabled() ? "ON" : "OFF");
     return;
   }
 
@@ -118,7 +146,7 @@ void setup() {
                 BlueTagConfig::kBuzzerPinPrimary,
                 BlueTagConfig::kBuzzerPinSecondary,
                 BlueTagConfig::kBuzzerFreqHz);
-  Serial.println("[USB] Ready. Commands: ID, STATUS, INFO, PING, BIND <WEB_ID>, UNBIND <WEB_ID>, TECH_RESET, RING 0, RING 1, RING 2");
+  Serial.println("[USB] Ready. Commands: ID, STATUS, INFO, PING, REFRESH, RECONNECT, FLUSH, BIND <WEB_ID>, UNBIND <WEB_ID>, TECH_RESET, SLEEP ON, SLEEP OFF, SLEEP STATUS, RING 0, RING 1, RING 2");
 }
 
 void loop() {

@@ -23,6 +23,7 @@ export class AppConfig {
   public readonly jwtExpiresIn = process.env.JWT_EXPIRES_IN || '7d';
   public readonly tagWriteMinIntervalMs = Number(process.env.TAG_WRITE_MIN_INTERVAL_MS || 15000);
   public readonly tagMoveMinMeters = Number(process.env.TAG_MOVE_MIN_METERS || 30);
+  public readonly tagSameLocationWriteIntervalMs = Number(process.env.TAG_SAME_LOCATION_WRITE_INTERVAL_MS || 300000);
   public readonly tagsCacheTtlMs = Number(process.env.TAGS_CACHE_TTL_MS || 5000);
   public readonly tagsListLimit = Number(process.env.TAGS_LIST_LIMIT || 300);
   public readonly tagRetentionDays = Number(process.env.TAG_RETENTION_DAYS || 30);

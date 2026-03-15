@@ -6,6 +6,7 @@ function createService() {
   const config = {
     tagWriteMinIntervalMs: 15000,
     tagMoveMinMeters: 30,
+    tagSameLocationWriteIntervalMs: 300000,
     tagsCacheTtlMs: 5000,
     tagsListLimit: 300,
   } as AppConfig;
@@ -82,5 +83,53 @@ describe('TagService.shouldWriteTag', () => {
     );
 
     expect(decision).toEqual({ write: true, reason: 'moved' });
+  });
+
+  it('does not rewrite the same location just because the short interval elapsed', () => {
+    const service = createService();
+    const updatedAt = new Date(Date.now() - 20000).toISOString();
+
+    const decision = service.shouldWriteTag(
+      {
+        tag_id: 'BT-1',
+        estimated_latitude: 13.7563,
+        estimated_longitude: 100.5018,
+        estimate_source: 'mobile',
+        updated_at: updatedAt,
+        sample_count: 4,
+      },
+      {
+        tag_id: 'BT-1',
+        estimated_latitude: 13.7563,
+        estimated_longitude: 100.5018,
+        estimate_source: 'mobile',
+      },
+    );
+
+    expect(decision).toEqual({ write: false, reason: 'throttled' });
+  });
+
+  it('refreshes the same location only after the longer same-location interval', () => {
+    const service = createService();
+    const updatedAt = new Date(Date.now() - 301000).toISOString();
+
+    const decision = service.shouldWriteTag(
+      {
+        tag_id: 'BT-1',
+        estimated_latitude: 13.7563,
+        estimated_longitude: 100.5018,
+        estimate_source: 'mobile',
+        updated_at: updatedAt,
+        sample_count: 4,
+      },
+      {
+        tag_id: 'BT-1',
+        estimated_latitude: 13.7563,
+        estimated_longitude: 100.5018,
+        estimate_source: 'mobile',
+      },
+    );
+
+    expect(decision).toEqual({ write: true, reason: 'same_location_refresh' });
   });
 });

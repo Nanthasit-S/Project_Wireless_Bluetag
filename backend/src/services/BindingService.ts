@@ -1,5 +1,6 @@
 import type { FastifyError } from 'fastify';
 import { BindingRepository } from '../repositories/BindingRepository';
+import { TagRepository } from '../repositories/TagRepository';
 import { AuditLogService } from './AuditLogService';
 import { WebIdService } from './WebIdService';
 
@@ -12,6 +13,7 @@ function createHttpError(statusCode: number, message: string): FastifyError {
 export class BindingService {
   public constructor(
     private readonly bindings: BindingRepository,
+    private readonly tags: TagRepository,
     private readonly webIds: WebIdService,
     private readonly auditLogs: AuditLogService,
   ) {}
@@ -36,6 +38,41 @@ export class BindingService {
 
   public list(ownerUserId: string) {
     return this.bindings.listByOwner(ownerUserId).then((rows) => rows.map((row) => this.toBindingResponse(row)));
+  }
+
+  public async inspectAccess(ownerUserId: string, tagId: string) {
+    if (!tagId) {
+      throw createHttpError(400, 'tag_id is required');
+    }
+
+    const existing = await this.bindings.findByTagId(tagId);
+    if (!existing) {
+      return {
+        tag_id: tagId,
+        access: 'unbound' as const,
+        web_id: null,
+        board_lock_state: 'unbound' as const,
+        board_web_id_hash: null,
+      };
+    }
+
+    if (existing.owner_user_id && existing.owner_user_id !== ownerUserId) {
+      return {
+        tag_id: tagId,
+        access: 'bound_to_other_account' as const,
+        web_id: null,
+        board_lock_state: existing.board_lock_state ?? 'locked',
+        board_web_id_hash: existing.board_web_id_hash ?? null,
+      };
+    }
+
+    return {
+      tag_id: tagId,
+      access: 'bound_to_my_web_id' as const,
+      web_id: existing.web_id,
+      board_lock_state: existing.board_lock_state ?? 'locked',
+      board_web_id_hash: existing.board_web_id_hash ?? null,
+    };
   }
 
   public async save(ownerUserId: string, tagId: string, webId: string) {
@@ -143,5 +180,55 @@ export class BindingService {
     });
 
     return this.toBindingResponse(updated);
+  }
+
+  public async factoryReset(ownerUserId: string, tagId: string) {
+    if (!tagId) {
+      throw createHttpError(400, 'tag_id is required');
+    }
+
+    const existingBinding = await this.bindings.findByTagId(tagId);
+    const existingTag = await this.tags.findByTagId(tagId, ownerUserId);
+
+    if ((!existingBinding || existingBinding.owner_user_id !== ownerUserId) && !existingTag) {
+      throw createHttpError(404, 'tag not found');
+    }
+
+    if (existingBinding?.owner_user_id && existingBinding.owner_user_id !== ownerUserId) {
+      throw createHttpError(403, 'tag_id นี้เป็นของผู้ใช้อื่น');
+    }
+
+    await this.tags.insertLocationHistory({
+      tagId,
+      estimatedLatitude: null,
+      estimatedLongitude: null,
+      estimateSource: 'factory_reset',
+      recordedAt: new Date().toISOString(),
+      ownerUserId,
+      writeReason: 'factory_reset',
+    });
+
+    const clearedLocation = await this.tags.deleteTagState(tagId, ownerUserId);
+    const removedBinding = existingBinding?.owner_user_id === ownerUserId ? await this.bindings.delete(tagId, ownerUserId) : false;
+
+    await this.auditLogs.write({
+      actorUserId: ownerUserId,
+      action: 'binding.factory_reset',
+      targetType: 'tag_binding',
+      targetId: tagId,
+      details: {
+        web_id: existingBinding?.web_id ?? null,
+        cleared_location: clearedLocation,
+        removed_binding: removedBinding,
+      },
+    });
+
+    return {
+      reset: true as const,
+      tag_id: tagId,
+      web_id: existingBinding?.web_id ?? null,
+      cleared_location: clearedLocation,
+      removed_binding: removedBinding,
+    };
   }
 }

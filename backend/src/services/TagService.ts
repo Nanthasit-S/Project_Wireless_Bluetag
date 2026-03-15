@@ -19,6 +19,7 @@ function toTagResponseRow(row: TagLocationRecord) {
 
   return {
     tag_id: row.tag_id,
+    nickname: row.nickname ?? null,
     estimated_latitude: row.estimated_latitude == null ? null : Number(row.estimated_latitude),
     estimated_longitude: row.estimated_longitude == null ? null : Number(row.estimated_longitude),
     estimate_source: row.estimate_source,
@@ -28,33 +29,37 @@ function toTagResponseRow(row: TagLocationRecord) {
 
 export class TagService {
   private readonly tagByIdCache = new Map<string, TagLocationRecord>();
-  private tagsListCache: { rows: TagLocationRecord[]; at: number } = { rows: [], at: 0 };
+  private readonly tagOwnerCache = new Map<string, string | null>();
+  private readonly tagsListCacheByOwner = new Map<string, { rows: TagLocationRecord[]; at: number }>();
 
   public constructor(
     private readonly config: AppConfig,
     private readonly tags: TagRepository,
   ) {}
 
-  public async listTags() {
-    const age = Date.now() - this.tagsListCache.at;
-    if (this.tagsListCache.rows.length > 0 && age < this.config.tagsCacheTtlMs) {
-      return this.tagsListCache.rows.map(toTagResponseRow);
+  public async listTags(ownerUserId: string) {
+    const cached = this.tagsListCacheByOwner.get(ownerUserId);
+    const age = cached ? Date.now() - cached.at : Number.POSITIVE_INFINITY;
+    if (cached && cached.rows.length > 0 && age < this.config.tagsCacheTtlMs) {
+      return cached.rows.map(toTagResponseRow);
     }
 
-    const rows = await this.tags.listRecent(this.config.tagsListLimit);
-    this.tagsListCache = { rows, at: Date.now() };
+    const rows = await this.tags.listRecent(this.config.tagsListLimit, ownerUserId);
+    this.tagsListCacheByOwner.set(ownerUserId, { rows, at: Date.now() });
     return rows.map(toTagResponseRow);
   }
 
-  public async getCachedOrFetch(tagId: string): Promise<TagLocationRecord | null> {
+  public async getCachedOrFetch(tagId: string, ownerUserId: string): Promise<TagLocationRecord | null> {
     const cached = this.tagByIdCache.get(tagId);
-    if (cached) {
+    const cachedOwner = this.tagOwnerCache.get(tagId);
+    if (cached && cachedOwner === ownerUserId) {
       return cached;
     }
 
-    const row = await this.tags.findByTagId(tagId);
+    const row = await this.tags.findByTagId(tagId, ownerUserId);
     if (row) {
       this.tagByIdCache.set(tagId, row);
+      this.tagOwnerCache.set(tagId, ownerUserId);
     }
 
     return row;
@@ -87,8 +92,8 @@ export class TagService {
       return { write: true, reason: 'moved' };
     }
 
-    if (ageMs >= this.config.tagWriteMinIntervalMs) {
-      return { write: true, reason: 'interval_elapsed' };
+    if (ageMs >= this.config.tagSameLocationWriteIntervalMs) {
+      return { write: true, reason: 'same_location_refresh' };
     }
 
     return { write: false, reason: 'throttled' };
@@ -96,6 +101,7 @@ export class TagService {
 
   public async storeTagLocation(params: {
     tagId: string;
+    nickname?: string | null;
     estimatedLatitude: number | null;
     estimatedLongitude: number | null;
     estimateSource: string;
@@ -111,7 +117,7 @@ export class TagService {
             }
           | {
               stored: true;
-              reason: 'source_changed' | 'interval_elapsed' | 'moved';
+              reason: 'source_changed' | 'interval_elapsed' | 'same_location_refresh' | 'moved';
               tag: ReturnType<typeof toTagResponseRow>;
               sample_count: number;
             };
@@ -130,7 +136,12 @@ export class TagService {
       throw createHttpError(400, 'tag_id is required');
     }
 
-    const existing = await this.getCachedOrFetch(params.tagId);
+    const existingAnyOwner = await this.tags.findByTagIdAnyOwner(params.tagId);
+    if (existingAnyOwner?.owner_user_id && existingAnyOwner.owner_user_id !== params.ownerUserId) {
+      throw createHttpError(403, 'tag_id นี้เป็นของผู้ใช้อื่น');
+    }
+
+    const existing = await this.getCachedOrFetch(params.tagId, params.ownerUserId);
     const incoming: TagWriteInput = {
       tag_id: params.tagId,
       estimated_latitude: params.estimatedLatitude,
@@ -152,6 +163,7 @@ export class TagService {
 
     const row = await this.tags.upsertTagLocation({
       tagId: params.tagId,
+      nickname: params.nickname ?? existing?.nickname ?? null,
       estimatedLatitude: params.estimatedLatitude,
       estimatedLongitude: params.estimatedLongitude,
       estimateSource: params.estimateSource,
@@ -171,14 +183,15 @@ export class TagService {
     });
 
     this.tagByIdCache.set(params.tagId, row);
-    this.tagsListCache.at = 0;
+    this.tagOwnerCache.set(params.tagId, params.ownerUserId);
+    this.tagsListCacheByOwner.delete(params.ownerUserId);
 
     if (existing) {
       return {
         statusCode: 200 as const,
         body: {
           stored: true,
-          reason: decision.reason as 'source_changed' | 'interval_elapsed' | 'moved',
+          reason: decision.reason as 'source_changed' | 'interval_elapsed' | 'same_location_refresh' | 'moved',
           tag: toTagResponseRow(row),
           sample_count: Number(row.sample_count || 0),
         },
@@ -192,6 +205,35 @@ export class TagService {
         reason: 'new' as const,
         tag: toTagResponseRow(row),
         sample_count: Number(row.sample_count || 0),
+      },
+    };
+  }
+
+  public async saveNickname(params: { tagId: string; nickname: string | null; ownerUserId: string }) {
+    if (!params.tagId) {
+      throw createHttpError(400, 'tag_id is required');
+    }
+
+    const existingAnyOwner = await this.tags.findByTagIdAnyOwner(params.tagId);
+    if (existingAnyOwner?.owner_user_id && existingAnyOwner.owner_user_id !== params.ownerUserId) {
+      throw createHttpError(403, 'tag_id นี้เป็นของผู้ใช้อื่น');
+    }
+
+    const row = await this.tags.updateNickname({
+      tagId: params.tagId,
+      nickname: params.nickname,
+      ownerUserId: params.ownerUserId,
+    });
+
+    this.tagByIdCache.set(params.tagId, row);
+    this.tagOwnerCache.set(params.tagId, params.ownerUserId);
+    this.tagsListCacheByOwner.delete(params.ownerUserId);
+
+    return {
+      statusCode: 200 as const,
+      body: {
+        saved: true as const,
+        tag: toTagResponseRow(row),
       },
     };
   }

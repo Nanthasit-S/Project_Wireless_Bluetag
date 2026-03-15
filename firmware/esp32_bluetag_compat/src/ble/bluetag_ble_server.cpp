@@ -12,10 +12,12 @@ void BlueTagBleServer::begin() {
   initializeIdentity();
   preferences_.begin(BlueTagConfig::kStorageNamespace, false);
   loadBindingState();
+  noteActivity();
   BLEDevice::init(tagId_.c_str());
   BLEServer* server = BLEDevice::createServer();
   server->setCallbacks(&serverCallbacks_);
   BLEService* service = server->createService(BlueTagConfig::kServiceUuid);
+  BLEService* legacyService = server->createService(BlueTagConfig::kLegacyServiceUuid);
   BLEService* fallbackService = server->createService(BlueTagConfig::kFallbackServiceUuid);
   BLEService* immediateAlertService = server->createService(BlueTagConfig::kImmediateAlertServiceUuid);
   BLEService* batteryService = server->createService(BlueTagConfig::kBatteryServiceUuid);
@@ -37,6 +39,15 @@ void BlueTagBleServer::begin() {
           BLECharacteristic::PROPERTY_NOTIFY);
   secondaryChar_->addDescriptor(new BLE2902());
   secondaryChar_->setCallbacks(&ringCharCallbacks_);
+
+  legacyChar_ = legacyService->createCharacteristic(
+      BlueTagConfig::kLegacyRingCharUuid,
+      BLECharacteristic::PROPERTY_READ |
+          BLECharacteristic::PROPERTY_WRITE |
+          BLECharacteristic::PROPERTY_WRITE_NR |
+          BLECharacteristic::PROPERTY_NOTIFY);
+  legacyChar_->addDescriptor(new BLE2902());
+  legacyChar_->setCallbacks(&ringCharCallbacks_);
 
   fallbackChar_ = fallbackService->createCharacteristic(
       BlueTagConfig::kFallbackRingCharUuid,
@@ -64,6 +75,7 @@ void BlueTagBleServer::begin() {
   publishMode();
   publishBattery(false);
   service->start();
+  legacyService->start();
   fallbackService->start();
   immediateAlertService->start();
   batteryService->start();
@@ -72,12 +84,15 @@ void BlueTagBleServer::begin() {
     pinMode(BlueTagConfig::kBatteryAdcPin, INPUT);
   }
 
+  BLEDevice::setPower(ESP_PWR_LVL_N0);
   BLEAdvertising* advertising = BLEDevice::getAdvertising();
-  advertising->addServiceUUID(BlueTagConfig::kServiceUuid);
-  advertising->addServiceUUID(BlueTagConfig::kBatteryServiceUuid);
   advertising->setScanResponse(true);
   advertising->setMinPreferred(0x06);
   advertising->setMinPreferred(0x12);
+  advertising->setMinInterval(BlueTagConfig::kAdvertisingMinIntervalUnits);
+  advertising->setMaxInterval(BlueTagConfig::kAdvertisingMaxIntervalUnits);
+  advertising->addServiceUUID(BlueTagConfig::kServiceUuid);
+  advertising->addServiceUUID(BlueTagConfig::kLegacyServiceUuid);
   publishAdvertisingPayload();
   BLEDevice::startAdvertising();
 
@@ -90,6 +105,9 @@ void BlueTagBleServer::begin() {
   Serial.printf("[BLE] chars=%s, %s\n",
                 BlueTagConfig::kRingCharPrimaryUuid,
                 BlueTagConfig::kRingCharSecondaryUuid);
+  Serial.printf("[BLE] legacy=%s/%s\n",
+                BlueTagConfig::kLegacyServiceUuid,
+                BlueTagConfig::kLegacyRingCharUuid);
   Serial.printf("[BLE] fallback=%s/%s\n",
                 BlueTagConfig::kFallbackServiceUuid,
                 BlueTagConfig::kFallbackRingCharUuid);
@@ -102,6 +120,7 @@ void BlueTagBleServer::begin() {
 }
 
 bool BlueTagBleServer::bindWebId(const String& webId, String* resolvedHash) {
+  noteActivity();
   const std::string normalizedHash = resolveWebIdHash(webId);
 
   if (normalizedHash.empty()) {
@@ -134,6 +153,7 @@ bool BlueTagBleServer::bindWebId(const String& webId, String* resolvedHash) {
 }
 
 bool BlueTagBleServer::unbindWebId(const String& webId, String* resolvedHash) {
+  noteActivity();
   const std::string normalizedHash = resolveWebIdHash(webId);
 
   if (boundWebIdHash_.empty()) {
@@ -159,6 +179,7 @@ bool BlueTagBleServer::unbindWebId(const String& webId, String* resolvedHash) {
 }
 
 void BlueTagBleServer::technicianReset(String* clearedHash) {
+  noteActivity();
   if (clearedHash != nullptr) {
     *clearedHash = boundWebIdHash_.c_str();
   }
@@ -187,6 +208,15 @@ void BlueTagBleServer::loadBindingState() {
   stored.trim();
   stored.toUpperCase();
   boundWebIdHash_ = stored.c_str();
+  sleepModeEnabled_ = preferences_.getBool(
+      BlueTagConfig::kSleepModeEnabledKey,
+      BlueTagConfig::kSleepModeDefaultEnabled);
+}
+
+bool BlueTagBleServer::setSleepModeEnabled(bool enabled) {
+  sleepModeEnabled_ = enabled;
+  noteActivity(BlueTagConfig::kBurstAdvertisingWindowMs * 4);
+  return preferences_.putBool(BlueTagConfig::kSleepModeEnabledKey, enabled);
 }
 
 std::string BlueTagBleServer::resolveWebIdHash(const String& webId) const {
@@ -210,11 +240,43 @@ std::string BlueTagBleServer::resolveWebIdHash(const String& webId) const {
 
 void BlueTagBleServer::update() {
   const uint32_t now = millis();
+  if (advertisingRestartPending_ && static_cast<int32_t>(now - nextAdvertisingRestartAtMs_) >= 0) {
+    restartAdvertisingNow();
+  }
+
+  if (canEnterTimedLightSleep() && static_cast<int32_t>(now - stayAwakeUntilMs_) >= 0) {
+    enterTimedLightSleep();
+    return;
+  }
+
   if (now < nextBatterySampleAtMs_) {
     return;
   }
-  nextBatterySampleAtMs_ = now + BlueTagConfig::kBatteryUpdateIntervalMs;
+  nextBatterySampleAtMs_ = now + nextBatteryUpdateIntervalMs();
   publishBattery(centralConnected_);
+}
+
+uint32_t BlueTagBleServer::nextBatteryUpdateIntervalMs() const {
+  return centralConnected_ ? BlueTagConfig::kBatteryUpdateIntervalConnectedMs
+                           : BlueTagConfig::kBatteryUpdateIntervalIdleMs;
+}
+
+void BlueTagBleServer::noteActivity(uint32_t extendMs) {
+  stayAwakeUntilMs_ = millis() + extendMs;
+}
+
+bool BlueTagBleServer::canEnterTimedLightSleep() const {
+  return sleepModeEnabled_ && !centralConnected_ && ring_.currentMode() == RingMode::Off;
+}
+
+void BlueTagBleServer::enterTimedLightSleep() {
+  Serial.printf("[POWER] Enter light sleep for %lu ms\n", static_cast<unsigned long>(BlueTagConfig::kLightSleepIntervalMs));
+  Serial.flush();
+  BLEDevice::stopAdvertising();
+  esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(BlueTagConfig::kLightSleepIntervalMs) * 1000ULL);
+  esp_light_sleep_start();
+  noteActivity();
+  scheduleAdvertisingRestart(0);
 }
 
 BlueTagBleServer::RingCharacteristicCallbacks::RingCharacteristicCallbacks(BlueTagBleServer& parent)
@@ -229,27 +291,55 @@ BlueTagBleServer::ServerCallbacks::ServerCallbacks(BlueTagBleServer& parent) : p
 void BlueTagBleServer::ServerCallbacks::onConnect(BLEServer* server) {
   (void)server;
   parent_.centralConnected_ = true;
+  parent_.advertisingRestartPending_ = false;
+  parent_.noteActivity(BlueTagConfig::kBurstAdvertisingWindowMs * 4);
   parent_.publishBattery(true);
+  parent_.publishMode();
   Serial.println("[BLE] Central connected");
 }
 
 void BlueTagBleServer::ServerCallbacks::onDisconnect(BLEServer* server) {
   (void)server;
   parent_.centralConnected_ = false;
+  parent_.noteActivity();
   // Keep current ring mode across transient disconnects.
   // The app intentionally reconnects per write; turning off here causes
   // audible on/off flicker even though no OFF command was sent.
-  Serial.println("[BLE] Central disconnected -> keep ring mode, restart advertising");
-  BLEDevice::startAdvertising();
+  Serial.println("[BLE] Central disconnected -> keep ring mode, schedule advertising restart");
+  parent_.scheduleAdvertisingRestart();
 }
 
 void BlueTagBleServer::handleRingWrite(const std::string& value) {
+  noteActivity(BlueTagConfig::kBurstAdvertisingWindowMs * 4);
   if (value.empty()) {
     Serial.println("[RING] write empty payload, ignored");
     return;
   }
 
   uint8_t modeByte = static_cast<uint8_t>(value[0]);
+  if (modeByte == 0xFA) {
+    String clearedHash;
+    technicianReset(&clearedHash);
+    ring_.applyMode(RingMode::Off);
+    publishMode();
+    Serial.printf("[BLE] FACTORY_RESET_OK=%s\n", clearedHash.c_str());
+    return;
+  }
+
+  if (modeByte == 0xA0) {
+    setSleepModeEnabled(false);
+    publishMode();
+    Serial.println("[POWER] sleep mode disabled by BLE");
+    return;
+  }
+
+  if (modeByte == 0xA1) {
+    setSleepModeEnabled(true);
+    publishMode();
+    Serial.println("[POWER] sleep mode enabled by BLE");
+    return;
+  }
+
   if (modeByte > 2) {
     if (value[0] == '0' || value[0] == '1' || value[0] == '2') {
       modeByte = static_cast<uint8_t>(value[0] - '0');
@@ -283,11 +373,45 @@ void BlueTagBleServer::publishMode() {
       fallbackChar_->notify();
     }
   }
+  if (legacyChar_ != nullptr) {
+    legacyChar_->setValue(&mode, 1);
+    if (centralConnected_) {
+      legacyChar_->notify();
+    }
+  }
   if (immediateAlertChar_ != nullptr) {
     immediateAlertChar_->setValue(&mode, 1);
     if (centralConnected_) {
       immediateAlertChar_->notify();
     }
+  }
+}
+
+void BlueTagBleServer::scheduleAdvertisingRestart(uint32_t delayMs) {
+  advertisingRestartPending_ = true;
+  nextAdvertisingRestartAtMs_ = millis() + delayMs;
+}
+
+void BlueTagBleServer::restartAdvertisingNow() {
+  BLEAdvertising* advertising = BLEDevice::getAdvertising();
+  if (advertising != nullptr) {
+    advertising->stop();
+    publishAdvertisingPayload();
+  }
+  BLEDevice::startAdvertising();
+  advertisingRestartPending_ = false;
+  Serial.println("[BLE] Advertising restarted");
+}
+
+void BlueTagBleServer::refreshRuntimeState(Stream* stream) {
+  noteActivity();
+  publishBattery(false);
+  publishMode();
+  scheduleAdvertisingRestart(0);
+  if (stream != nullptr) {
+    stream->println("REFRESH_OK");
+    printSerialSummary(*stream);
+    stream->flush();
   }
 }
 
@@ -331,9 +455,13 @@ void BlueTagBleServer::publishAdvertisingPayload() {
     manufacturerData.push_back(static_cast<char>((tagHash >> shift) & 0xFF));
   }
 
+  BLEAdvertisementData advertisementData;
+  advertisementData.setName(BlueTagConfig::kLegacyAdvertisedName);
+  advertisementData.setManufacturerData(manufacturerData);
+  advertising->setAdvertisementData(advertisementData);
+
   BLEAdvertisementData scanResponse;
   scanResponse.setName(tagId_);
-  scanResponse.setManufacturerData(manufacturerData);
   advertising->setScanResponseData(scanResponse);
 }
 
@@ -389,10 +517,14 @@ void BlueTagBleServer::printSerialSummary(Stream& stream) const {
   stream.printf("TAG_ID=%s\n", tagId_.c_str());
   stream.printf("BOUND_WEB_ID_HASH=%s\n", boundWebIdHash_.empty() ? "" : boundWebIdHash_.c_str());
   stream.printf("LOCK_STATE=%s\n", boundWebIdHash_.empty() ? "UNBOUND" : "LOCKED");
+  stream.printf("SLEEP_MODE=%s\n", sleepModeEnabled_ ? "ON" : "OFF");
   stream.printf("BATTERY=%u\n", static_cast<unsigned>(lastBatteryPercent_));
+  stream.printf("DEVICE_NAME=%s\n", BlueTagConfig::kLegacyAdvertisedName);
   stream.printf("SERVICE_1910=%s\n", BlueTagConfig::kServiceUuid);
   stream.printf("CHAR_2B10=%s\n", BlueTagConfig::kRingCharPrimaryUuid);
   stream.printf("CHAR_2B11=%s\n", BlueTagConfig::kRingCharSecondaryUuid);
+  stream.printf("SERVICE_LEGACY=%s\n", BlueTagConfig::kLegacyServiceUuid);
+  stream.printf("CHAR_LEGACY=%s\n", BlueTagConfig::kLegacyRingCharUuid);
   stream.printf("SERVICE_FFF0=%s\n", BlueTagConfig::kFallbackServiceUuid);
   stream.printf("CHAR_FFF1=%s\n", BlueTagConfig::kFallbackRingCharUuid);
   stream.printf("SERVICE_IAS=%s\n", BlueTagConfig::kImmediateAlertServiceUuid);

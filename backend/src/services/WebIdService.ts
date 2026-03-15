@@ -63,6 +63,7 @@ export class WebIdService {
       web_id: webId,
       tags: rows.map((row) => ({
         tag_id: row.tag_id,
+        nickname: row.nickname ?? null,
         web_id: row.web_id,
         binding_updated_at: this.toTimestamp(row.binding_updated_at),
         estimated_latitude: row.estimated_latitude == null ? null : Number(row.estimated_latitude),

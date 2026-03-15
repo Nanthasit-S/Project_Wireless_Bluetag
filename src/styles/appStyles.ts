@@ -1,6 +1,15 @@
 import { StyleSheet } from 'react-native';
 
 export const styles = StyleSheet.create({
+  authLayoutFrame: {
+    flex: 1,
+  },
+  authKeyboardShell: {
+    flex: 1,
+  },
+  authScrollContent: {
+    flexGrow: 1,
+  },
   backgroundLayer: {
     ...StyleSheet.absoluteFillObject,
     overflow: 'hidden',
@@ -41,6 +50,21 @@ export const styles = StyleSheet.create({
     gap: 18,
     maxWidth: 1160,
   },
+  authShellMobile: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  authShellKeyboardOpen: {
+    justifyContent: 'flex-start',
+  },
+  authShellCompact: {
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+    gap: 14,
+  },
+  authShellShort: {
+    paddingVertical: 18,
+  },
   authShellDesktop: {
     flexDirection: 'row',
     alignItems: 'stretch',
@@ -53,6 +77,16 @@ export const styles = StyleSheet.create({
     padding: 24,
     gap: 16,
   },
+  authHeroMobile: {
+    padding: 18,
+    gap: 12,
+  },
+  authHeroCompact: {
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 10,
+  },
   authHeroDesktop: {
     flex: 1.1,
     minHeight: 520,
@@ -60,6 +94,9 @@ export const styles = StyleSheet.create({
   },
   authHeroContent: {
     gap: 10,
+  },
+  authHeroContentCompact: {
+    gap: 6,
   },
   heroBadge: {
     alignSelf: 'flex-start',
@@ -82,6 +119,16 @@ export const styles = StyleSheet.create({
     letterSpacing: -1.8,
     fontFamily: 'Sarabun_700Bold',
   },
+  authBrandMobile: {
+    fontSize: 44,
+    lineHeight: 44,
+    letterSpacing: -1.1,
+  },
+  authBrandCompact: {
+    fontSize: 34,
+    lineHeight: 36,
+    letterSpacing: -0.8,
+  },
   authTitle: {
     color: '#cbd5e1',
     fontSize: 24,
@@ -89,12 +136,28 @@ export const styles = StyleSheet.create({
     fontFamily: 'Sarabun_700Bold',
     maxWidth: 520,
   },
+  authTitleMobile: {
+    fontSize: 21,
+    lineHeight: 27,
+  },
+  authTitleCompact: {
+    fontSize: 18,
+    lineHeight: 24,
+  },
   authCopy: {
     color: '#cbd5e1',
     fontSize: 15,
     lineHeight: 23,
     maxWidth: 500,
     fontFamily: 'Sarabun_400Regular',
+  },
+  authCopyMobile: {
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  authCopyCompact: {
+    fontSize: 13,
+    lineHeight: 19,
   },
   authHeroDivider: {
     width: 72,
@@ -130,6 +193,31 @@ export const styles = StyleSheet.create({
     shadowRadius: 32,
     elevation: 6,
   },
+  authCardMobile: {
+    borderRadius: 24,
+    padding: 18,
+    gap: 14,
+    width: '100%',
+    maxWidth: 460,
+    alignSelf: 'center',
+  },
+  authMobileSpacer: {
+    height: 8,
+  },
+  authMobileSubmitBar: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 16,
+    backgroundColor: 'rgba(248, 250, 252, 0.96)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(203, 213, 225, 0.72)',
+  },
+  authCardCompact: {
+    borderRadius: 22,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+    gap: 12,
+  },
   authCardDesktop: {
     flex: 0.9,
     justifyContent: 'center',
@@ -139,12 +227,20 @@ export const styles = StyleSheet.create({
     minHeight: 122,
     gap: 6,
   },
+  authCardHeaderMobile: {
+    minHeight: 0,
+  },
+  authCardHeaderCompact: {
+    gap: 4,
+  },
   authModeSwitch: {
     flexDirection: 'row',
     borderRadius: 18,
     backgroundColor: '#e2e8f0',
     padding: 4,
     gap: 6,
+    width: '100%',
+    alignSelf: 'center',
   },
   authModePill: {
     flex: 1,
@@ -167,6 +263,9 @@ export const styles = StyleSheet.create({
     fontWeight: '700',
     fontFamily: 'Sarabun_700Bold',
   },
+  authModeTextCompact: {
+    fontSize: 12,
+  },
   authModeTextActive: {
     color: '#0f172a',
   },
@@ -185,11 +284,23 @@ export const styles = StyleSheet.create({
     fontWeight: '800',
     fontFamily: 'Sarabun_700Bold',
   },
+  authCardTitleMobile: {
+    fontSize: 24,
+    lineHeight: 30,
+  },
+  authCardTitleCompact: {
+    fontSize: 21,
+    lineHeight: 27,
+  },
   authCardCopy: {
     color: '#475569',
     fontSize: 14,
     lineHeight: 21,
     fontFamily: 'Sarabun_400Regular',
+  },
+  authCardCopyCompact: {
+    fontSize: 13,
+    lineHeight: 19,
   },
   authFieldGroup: {
     gap: 8,
@@ -211,6 +322,12 @@ export const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     fontFamily: 'Sarabun_700Bold',
+  },
+  authBackendHint: {
+    color: '#64748b',
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'Sarabun_400Regular',
   },
   authFieldHint: {
     color: '#64748b',
@@ -274,6 +391,9 @@ export const styles = StyleSheet.create({
   passwordStrengthItemCard: {
     width: '48%',
   },
+  passwordStrengthItemCardCompact: {
+    width: '100%',
+  },
   passwordStrengthItem: {
     color: '#64748b',
     fontSize: 12,
@@ -303,6 +423,7 @@ export const styles = StyleSheet.create({
     position: 'relative',
     overflow: 'hidden',
     borderRadius: 18,
+    width: '100%',
   },
   authSubmitGlow: {
     ...StyleSheet.absoluteFillObject,
@@ -317,6 +438,7 @@ export const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.16)',
   },
   primaryButton: {
+    width: '100%',
     alignItems: 'center',
     borderRadius: 18,
     backgroundColor: '#0f172a',
@@ -356,6 +478,12 @@ export const styles = StyleSheet.create({
     paddingBottom: 36,
     gap: 12,
   },
+  scrollShellMobile: {
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 24,
+    gap: 10,
+  },
   dashboardShell: {
     flex: 1,
     position: 'relative',
@@ -367,12 +495,19 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
+  topBarMobile: {
+    alignItems: 'stretch',
+    gap: 10,
+  },
   topBarLayer: {
     zIndex: 30,
   },
   topBarMeta: {
     gap: 4,
     flexShrink: 1,
+  },
+  topBarMetaMobile: {
+    gap: 2,
   },
   topBarTitle: {
     color: '#0f172a',
@@ -398,6 +533,11 @@ export const styles = StyleSheet.create({
     alignItems: 'flex-end',
     zIndex: 40,
   },
+  profileMenuShellMobile: {
+    minWidth: 0,
+    width: '100%',
+    alignItems: 'stretch',
+  },
   profileMenuButton: {
     minWidth: 240,
     flexDirection: 'row',
@@ -414,6 +554,10 @@ export const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 20,
     elevation: 2,
+  },
+  profileMenuButtonMobile: {
+    minWidth: 0,
+    width: '100%',
   },
   profileMenuButtonActive: {
     borderColor: 'rgba(14, 165, 233, 0.36)',
@@ -471,6 +615,10 @@ export const styles = StyleSheet.create({
     elevation: 6,
     zIndex: 20,
   },
+  profileMenuCardMobile: {
+    width: '100%',
+    maxWidth: 380,
+  },
   profileMenuModalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.04)',
@@ -492,6 +640,14 @@ export const styles = StyleSheet.create({
     position: 'absolute',
     width: 290,
     zIndex: 20,
+  },
+  profileMenuModalShellMobile: {
+    position: 'absolute',
+    top: 88,
+    left: 16,
+    right: 16,
+    width: 'auto',
+    alignItems: 'center',
   },
   profileMenuHeader: {
     flexDirection: 'row',
@@ -579,6 +735,75 @@ export const styles = StyleSheet.create({
     color: '#be123c',
     fontSize: 14,
     fontFamily: 'Sarabun_700Bold',
+  },
+  mobileBottomMenuScrollPadding: {
+    paddingBottom: 132,
+  },
+  mobileBottomNavWrap: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 30,
+    borderRadius: 26,
+    overflow: 'hidden',
+  },
+  mobileBottomNavBlur: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  mobileBottomNavCard: {
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.16)',
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    paddingHorizontal: 10,
+    paddingTop: 10,
+    paddingBottom: 10,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.12,
+    shadowRadius: 28,
+    elevation: 10,
+  },
+  mobileBottomNavItems: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  mobileBottomNavItemsWrap: {
+    flexWrap: 'wrap',
+  },
+  mobileBottomNavItem: {
+    flex: 1,
+    minWidth: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 0,
+    minHeight: 48,
+    borderRadius: 16,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'transparent',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  mobileBottomNavItemHalf: {
+    flexBasis: '48%',
+    flexGrow: 1,
+  },
+  mobileBottomNavItemActive: {
+    backgroundColor: '#eef2ff',
+    borderColor: '#c7d2fe',
+  },
+  mobileBottomNavItemPressed: {
+    backgroundColor: '#f8fafc',
+    transform: [{ scale: 0.985 }],
+  },
+  mobileBottomNavLabel: {
+    color: '#475569',
+    fontSize: 14,
+    fontFamily: 'Sarabun_700Bold',
+  },
+  mobileBottomNavLabelActive: {
+    color: '#312e81',
   },
   routeLoadingModalRoot: {
     flex: 1,

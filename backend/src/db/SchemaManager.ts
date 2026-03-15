@@ -24,6 +24,7 @@ export class SchemaManager {
 
       create table if not exists tag_locations (
         tag_id text primary key,
+        nickname text null,
         estimated_latitude double precision null,
         estimated_longitude double precision null,
         estimate_source text null,
@@ -34,6 +35,8 @@ export class SchemaManager {
 
       create index if not exists idx_tag_locations_updated_at
         on tag_locations(updated_at desc);
+
+      alter table tag_locations add column if not exists nickname text null;
 
       create table if not exists tag_location_history (
         id bigserial primary key,

@@ -41,7 +41,7 @@ export class AppContainer {
     this.auditLogService = new AuditLogService(auditLogRepository);
     this.tagService = new TagService(config, tagRepository);
     this.webIdService = new WebIdService(webIdRepository, tagRepository);
-    this.bindingService = new BindingService(bindingRepository, this.webIdService, this.auditLogService);
+    this.bindingService = new BindingService(bindingRepository, tagRepository, this.webIdService, this.auditLogService);
     this.historyService = new HistoryService(tagRepository, this.webIdService);
     this.adminService = new AdminService(userRepository, adminRepository, this.auditLogService);
   }

@@ -96,6 +96,7 @@ export function useBackendController(params: {
     backendBase,
     mapQueryTag,
     localTagLocations,
+    authorizedFetch,
     onUnauthorized: handleUnauthorized,
   });
 
@@ -124,6 +125,8 @@ export function useBackendController(params: {
     adminBindingMismatches: adminTools.bindingMismatches,
     adminLoading: adminTools.adminLoading,
     mapTag: mapSync.mapTag,
+    recordConnectedTagLastSeen: mapSync.recordConnectedTagLastSeen,
+    saveTagNickname: mapSync.saveTagNickname,
     authReady: auth.authReady,
     authToken: auth.authToken,
     authMode: auth.authMode,
@@ -135,6 +138,7 @@ export function useBackendController(params: {
     selectedWebId: webBindings.selectedWebId,
     tagBindings: webBindings.tagBindings,
     selectedWebIdOverview: webBindings.selectedWebIdOverview,
+    checkTagAccess: webBindings.checkTagAccess,
     locationHistoryItems: locationHistory.locationHistoryItems,
     locationHistoryCursor: locationHistory.locationHistoryCursor,
     locationHistoryLoading: locationHistory.locationHistoryLoading,
@@ -153,6 +157,7 @@ export function useBackendController(params: {
     handleUnassignTag: webBindings.handleUnassignTag,
     handleSyncBoardState: webBindings.handleSyncBoardState,
     handleTechnicianResetTag: webBindings.handleTechnicianResetTag,
+    handleFactoryResetTag: webBindings.handleFactoryResetTag,
     handleAdminUserRoleUpdate: adminTools.updateUserRole,
     handleAdminDeleteUser: adminTools.deleteUser,
     handleAdminClearTagState: adminTools.clearTagState,

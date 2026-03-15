@@ -18,6 +18,7 @@ export const authTokenResponseSchema = z.object({
 
 export const tagLocationSchema = z.object({
   tag_id: z.string(),
+  nickname: z.string().nullable().optional(),
   estimated_latitude: z.number().nullable(),
   estimated_longitude: z.number().nullable(),
   estimate_source: z.string().nullable(),
@@ -36,4 +37,12 @@ export const bindingSchema = z.object({
   board_web_id_hash: z.string().nullable().optional(),
   board_lock_state: z.string().nullable().optional(),
   board_synced_at: z.string().nullable().optional(),
+});
+
+export const bindingAccessSchema = z.object({
+  tag_id: z.string(),
+  access: z.enum(['unbound', 'bound_to_my_web_id', 'bound_to_other_account']),
+  web_id: z.string().nullable(),
+  board_lock_state: z.string().nullable().optional(),
+  board_web_id_hash: z.string().nullable().optional(),
 });

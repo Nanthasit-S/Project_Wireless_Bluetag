@@ -3,12 +3,14 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include <string>
+#include <esp_sleep.h>
 #include <BLE2902.h>
 #include <BLEAdvertising.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
 
+#include "config/bluetag_config.h"
 #include "controllers/ring_controller.h"
 
 class BlueTagBleServer {
@@ -22,6 +24,9 @@ class BlueTagBleServer {
   bool unbindWebId(const String& webId, String* resolvedHash = nullptr);
   void technicianReset(String* clearedHash = nullptr);
   const std::string& boundWebIdHash() const { return boundWebIdHash_; }
+  bool setSleepModeEnabled(bool enabled);
+  bool isSleepModeEnabled() const { return sleepModeEnabled_; }
+  void refreshRuntimeState(Stream* stream = nullptr);
 
  private:
   class RingCharacteristicCallbacks : public BLECharacteristicCallbacks {
@@ -49,6 +54,12 @@ class BlueTagBleServer {
   void publishAdvertisingPayload();
   void initializeIdentity();
   void loadBindingState();
+  void scheduleAdvertisingRestart(uint32_t delayMs = 60);
+  void restartAdvertisingNow();
+  uint32_t nextBatteryUpdateIntervalMs() const;
+  void noteActivity(uint32_t extendMs = BlueTagConfig::kBurstAdvertisingWindowMs);
+  bool canEnterTimedLightSleep() const;
+  void enterTimedLightSleep();
   std::string resolveWebIdHash(const String& webId) const;
   uint8_t readBatteryPercent() const;
   uint32_t resolveTagHash() const;
@@ -59,13 +70,18 @@ class BlueTagBleServer {
   std::string boundWebIdHash_;
   BLECharacteristic* primaryChar_ = nullptr;
   BLECharacteristic* secondaryChar_ = nullptr;
+  BLECharacteristic* legacyChar_ = nullptr;
   BLECharacteristic* fallbackChar_ = nullptr;
   BLECharacteristic* immediateAlertChar_ = nullptr;
   BLECharacteristic* batteryChar_ = nullptr;
   bool centralConnected_ = false;
+  bool sleepModeEnabled_ = BlueTagConfig::kSleepModeDefaultEnabled;
+  bool advertisingRestartPending_ = false;
   uint8_t lastBatteryPercent_ = 0;
   uint32_t advCounter_ = 0;
   uint32_t nextBatterySampleAtMs_ = 0;
+  uint32_t nextAdvertisingRestartAtMs_ = 0;
+  uint32_t stayAwakeUntilMs_ = 0;
   RingCharacteristicCallbacks ringCharCallbacks_;
   ServerCallbacks serverCallbacks_;
 };

@@ -5,6 +5,7 @@ import type {
   LocationHistoryCursor,
   LocationHistoryItem,
   SeenTag,
+  TagBindingAccessRecord,
 } from './bluetag';
 
 export type DashboardView = 'dashboard' | 'profile' | 'settings' | 'admin';
@@ -28,11 +29,37 @@ export interface TagOptionViewModel {
   lastSeen: string;
 }
 
+export interface MobileBoundTagCardViewModel {
+  tagId: string;
+  name: string;
+  webId: string;
+  inRange: boolean;
+  connected: boolean;
+  rssi: number | null;
+  battery: number | null;
+  lastSeen: string;
+}
+
+export interface ProfileBoundTagViewModel {
+  tagId: string;
+  name: string;
+  nickname: string;
+  webId: string;
+  battery: number | null;
+  rssi: number | null;
+  lastSeen: string;
+  sampleCount: number;
+  estimateSource: string;
+  latitude: number | null;
+  longitude: number | null;
+}
+
 export interface AuthScreenViewModel {
   authReady: boolean;
   fontsLoaded: boolean;
   authDesktop: boolean;
   authMode: 'login' | 'register';
+  backendBase: string;
   authEmail: string;
   authPassword: string;
   authName: string;
@@ -41,6 +68,7 @@ export interface AuthScreenViewModel {
 }
 
 export interface AuthScreenActions {
+  onChangeBackendBase: (value: string) => void;
   onChangeEmail: (value: string) => void;
   onChangePassword: (value: string) => void;
   onChangeName: (value: string) => void;
@@ -77,7 +105,10 @@ export interface MobileDashboardViewModel {
   bleReady: boolean;
   isScanning: boolean;
   autoRingEnabled: boolean;
+  autoRingPausedReason: string;
   targetTag: string;
+  connectedTagId: string;
+  ringTargetTagId: string;
   message: string;
   targetSummary: string;
   shouldShowBleControl: boolean;
@@ -91,13 +122,16 @@ export interface MobileDashboardViewModel {
   showLocalhostWarning: boolean;
   shouldShowManualRing: boolean;
   shouldShowNearby: boolean;
+  shouldShowConnectActions: boolean;
   tagList: SeenTag[];
   formatDistanceMeters: (rssi: number) => string;
   rssiZone: (rssi: number) => string;
   tagBindings: Record<string, string>;
+  tagAccessById: Record<string, TagBindingAccessRecord>;
   isWeb: boolean;
   selectedWebId: string;
   tagNicknames: Record<string, string>;
+  boundTagCards: MobileBoundTagCardViewModel[];
 }
 
 export interface DashboardScreenViewModel {
@@ -114,6 +148,7 @@ export interface DashboardScreenViewModel {
   currentUserLoading: boolean;
   canAccessAdminTools: boolean;
   backendBase: string;
+  profileBoundTags: ProfileBoundTagViewModel[];
   desktop: DesktopDashboardViewModel;
   mobile: MobileDashboardViewModel;
 }
@@ -122,7 +157,7 @@ export interface DesktopDashboardActions {
   onSelectHistoryItem: (item: LocationHistoryItem) => void;
   onLoadMoreHistory: () => void;
   onDesktopPickTag: (tagId: string) => void;
-  onSaveTagNickname: (tagId: string, nickname: string) => void;
+  onSaveTagNickname: (tagId: string, nickname: string) => Promise<boolean>;
   onAssignTag: (tagId: string, webId: string) => Promise<boolean>;
   onUnassignTag: (tagId: string) => Promise<boolean>;
   onSyncBoardState: (params: {
@@ -140,7 +175,10 @@ export interface DesktopDashboardActions {
 
 export interface MobileDashboardActions {
   setTargetTag: (tagId: string) => void;
+  onConnectTag: (tagId: string) => void;
+  onDisconnectTag: () => void;
   onStartScan: () => void;
+  onRefreshScan: () => void;
   onStopScan: () => void;
   onToggleAutoRing: () => void;
   onManualOff: () => void;
@@ -148,7 +186,8 @@ export interface MobileDashboardActions {
   onManualFast: () => void;
   onAssignTag: (tagId: string, webId: string) => Promise<boolean>;
   onUnassignTag: (tagId: string) => Promise<boolean>;
-  onSaveTagNickname: (tagId: string, nickname: string) => void;
+  onSaveTagNickname: (tagId: string, nickname: string) => Promise<boolean>;
+  onFactoryResetTag: (tagId: string) => Promise<boolean>;
 }
 
 export interface DashboardScreenActions extends DesktopDashboardActions, MobileDashboardActions {

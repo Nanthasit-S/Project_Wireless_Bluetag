@@ -1,18 +1,22 @@
-import { Button, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 type ScanSectionProps = {
   bleReady: boolean;
   isScanning: boolean;
   autoRingEnabled: boolean;
   targetTag: string;
+  connectedTagId: string;
   message: string;
   targetSummary: string;
   disableBleActions?: boolean;
   allowTargetInput?: boolean;
   showAutoRingToggle?: boolean;
+  showConnectAction?: boolean;
   restrictionNote?: string;
   onStartScan: () => void;
   onStopScan: () => void;
+  onConnectTarget: () => void;
+  onDisconnectTarget: () => void;
   onToggleAutoRing: () => void;
   onChangeTargetTag: (value: string) => void;
 };
@@ -22,14 +26,18 @@ export function ScanSection({
   isScanning,
   autoRingEnabled,
   targetTag,
+  connectedTagId,
   message,
   targetSummary,
   disableBleActions = false,
   allowTargetInput = true,
   showAutoRingToggle = true,
+  showConnectAction = true,
   restrictionNote,
   onStartScan,
   onStopScan,
+  onConnectTarget,
+  onDisconnectTarget,
   onToggleAutoRing,
   onChangeTargetTag,
 }: ScanSectionProps) {
@@ -40,20 +48,52 @@ export function ScanSection({
       {!bleReady ? (
         <Text className="text-slate-600 text-sm">BLE ใช้งานได้บน native build เท่านั้น ให้รัน `npx expo run:android`</Text>
       ) : null}
-      <View className="flex-row justify-between gap-2.5">
-        <Button
-          title={isScanning ? 'กำลังสแกน...' : 'เริ่มสแกน'}
-          onPress={onStartScan}
+      <View style={styles.buttonRow}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.primaryAction,
+            (isScanning || disableBleActions) && styles.disabledAction,
+            pressed ? styles.pressedAction : null,
+          ]}
           disabled={isScanning || disableBleActions}
-        />
-        <Button title="หยุด" onPress={onStopScan} disabled={disableBleActions} />
-      </View>
-      {showAutoRingToggle ? (
-        <Button
-          title={`ส่งเสียงอัตโนมัติ: ${autoRingEnabled ? 'เปิด' : 'ปิด'}`}
-          onPress={onToggleAutoRing}
+          onPress={onStartScan}
+        >
+          <Text style={styles.primaryActionText}>{isScanning ? 'กำลังสแกน...' : 'เริ่มสแกน'}</Text>
+        </Pressable>
+        <Pressable
+          style={({ pressed }) => [styles.secondaryAction, disableBleActions && styles.disabledAction, pressed ? styles.pressedAction : null]}
           disabled={disableBleActions}
-        />
+          onPress={onStopScan}
+        >
+          <Text style={styles.secondaryActionText}>หยุด</Text>
+        </Pressable>
+      </View>
+      {showConnectAction ? (
+        <View style={styles.buttonRow}>
+          <Pressable
+            style={({ pressed }) => [styles.primaryAction, (!targetTag.trim() || disableBleActions) && styles.disabledAction, pressed ? styles.pressedAction : null]}
+            disabled={!targetTag.trim() || disableBleActions}
+            onPress={onConnectTarget}
+          >
+            <Text style={styles.primaryActionText}>{connectedTagId ? 'เชื่อมใหม่' : 'Connect'}</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.secondaryAction, (!connectedTagId || disableBleActions) && styles.disabledAction, pressed ? styles.pressedAction : null]}
+            disabled={!connectedTagId || disableBleActions}
+            onPress={onDisconnectTarget}
+          >
+            <Text style={styles.secondaryActionText}>Disconnect</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {showAutoRingToggle ? (
+        <Pressable
+          style={({ pressed }) => [styles.secondaryWideAction, disableBleActions && styles.disabledAction, pressed ? styles.pressedAction : null]}
+          disabled={disableBleActions}
+          onPress={onToggleAutoRing}
+        >
+          <Text style={styles.secondaryActionText}>{`ส่งเสียงอัตโนมัติ: ${autoRingEnabled ? 'เปิด' : 'ปิด'}`}</Text>
+        </Pressable>
       ) : null}
       <TextInput
         className="bg-slate-50 text-slate-900 border border-slate-300 rounded-lg px-3 py-2"
@@ -71,3 +111,56 @@ export function ScanSection({
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  buttonRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  primaryAction: {
+    flexGrow: 1,
+    minWidth: 140,
+    alignItems: 'center',
+    borderRadius: 14,
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  secondaryAction: {
+    flexGrow: 1,
+    minWidth: 100,
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  secondaryWideAction: {
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  primaryActionText: {
+    color: '#f8fafc',
+    fontSize: 15,
+    fontFamily: 'Sarabun_700Bold',
+  },
+  secondaryActionText: {
+    color: '#0f172a',
+    fontSize: 15,
+    fontFamily: 'Sarabun_600SemiBold',
+  },
+  disabledAction: {
+    opacity: 0.5,
+  },
+  pressedAction: {
+    opacity: 0.78,
+  },
+});

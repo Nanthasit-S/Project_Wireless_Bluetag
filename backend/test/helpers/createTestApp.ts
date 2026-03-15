@@ -41,6 +41,20 @@ function baseContainer(): DeepPartial<AppContainer> {
           sample_count: 1,
         },
       }),
+      saveNickname: async () => ({
+        statusCode: 200,
+        body: {
+          saved: true,
+          tag: {
+            tag_id: 'BT-1',
+            nickname: 'My BlueTag',
+            estimated_latitude: 13.1,
+            estimated_longitude: 100.1,
+            estimate_source: 'mobile',
+            updated_at: new Date().toISOString(),
+          },
+        },
+      }),
     },
     webIdService: {
       list: async () => [],

@@ -15,5 +15,14 @@ yarn-error.log*
 .env
 backend/.env
 
+# Local tooling
+.venv/
+android/.gradle/
+android/.kotlin/
+android/app/.cxx/
+android/app/build/
+android/build/
+ios/build/
+
 # Firmware build output
 firmware/esp32_bluetag_compat/.pio/

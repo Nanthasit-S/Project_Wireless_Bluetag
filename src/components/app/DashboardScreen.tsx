@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { BlurView } from 'expo-blur';
 import { StatusBar } from 'expo-status-bar';
-import { Animated, Easing, Modal, Pressable, SafeAreaView, ScrollView, Text, View } from 'react-native';
+import { Animated, Easing, Modal, Pressable, SafeAreaView, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { HeaderCard } from '../dashboard/HeaderCard';
 import type { DashboardScreenActions, DashboardScreenViewModel, DashboardView } from '../../types/appViewModels';
 import { BackgroundOrbs } from './BackgroundOrbs';
@@ -9,7 +9,6 @@ import { DashboardTopBar } from './dashboard/DashboardTopBar';
 import { DesktopDashboardSections } from './dashboard/DesktopDashboardSections';
 import { MobileDashboardSections } from './dashboard/MobileDashboardSections';
 import { UserProfilePanel } from './dashboard/UserProfilePanel';
-import { UserSettingsPanel } from './dashboard/UserSettingsPanel';
 import { AdminToolsPanel } from './dashboard/AdminToolsPanel';
 import { TransitionLoadingDots } from './TransitionLoadingDots';
 import { styles } from '../../styles/appStyles';
@@ -22,11 +21,24 @@ interface DashboardScreenProps {
 const viewLoadingLabel: Record<DashboardView, string> = {
   dashboard: 'กำลังเปิดหน้าหลัก',
   profile: 'กำลังเปิดโปรไฟล์',
-  settings: 'กำลังเปิดหน้าตั้งค่า',
   admin: 'กำลังเปิดหน้าแอดมิน',
+  settings: 'กำลังเปิดหน้าหลัก',
+};
+
+const mobileMenuItems: Array<{ key: DashboardView; label: string }> = [
+  { key: 'dashboard', label: 'Scan' },
+  { key: 'profile', label: 'Profile' },
+];
+
+const mobileAdminItem: { key: DashboardView; label: string } = {
+  key: 'admin',
+  label: 'Admin',
 };
 
 export function DashboardScreen({ viewModel, actions }: DashboardScreenProps) {
+  const { width } = useWindowDimensions();
+  const isCompactMobile = !viewModel.isDesktopWeb && width < 768;
+  const isNarrowMobile = isCompactMobile && width < 390;
   const [currentView, setCurrentView] = useState<DashboardView>('dashboard');
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
@@ -98,7 +110,7 @@ export function DashboardScreen({ viewModel, actions }: DashboardScreenProps) {
   }, [routeLoading, routeOverlayProgress]);
 
   useEffect(() => {
-    if (!viewModel.canAccessAdminTools && currentView === 'admin') {
+    if ((!viewModel.canAccessAdminTools && currentView === 'admin') || currentView === 'settings') {
       setCurrentView('dashboard');
     }
   }, [currentView, viewModel.canAccessAdminTools]);
@@ -154,12 +166,21 @@ export function DashboardScreen({ viewModel, actions }: DashboardScreenProps) {
     actions.onLogout();
   };
 
+  const compactMenuItems = viewModel.canAccessAdminTools ? [...mobileMenuItems, mobileAdminItem] : mobileMenuItems;
+
   return (
     <SafeAreaView className="flex-1 bg-material-bg">
       <StatusBar style="dark" />
       <BackgroundOrbs />
       <View style={styles.dashboardShell}>
-        <ScrollView contentContainerStyle={[styles.scrollShell, { maxWidth: viewModel.dashboardMaxWidth }]}>
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollShell,
+            isCompactMobile && styles.scrollShellMobile,
+            isCompactMobile && styles.mobileBottomMenuScrollPadding,
+            { maxWidth: viewModel.dashboardMaxWidth },
+          ]}
+        >
           <Animated.View
             style={[
               styles.topBarLayer,
@@ -176,34 +197,39 @@ export function DashboardScreen({ viewModel, actions }: DashboardScreenProps) {
               },
             ]}
           >
-            <DashboardTopBar
-              currentView={currentView}
-              currentUserName={viewModel.currentUserName}
-              currentUserEmail={viewModel.currentUserEmail}
-              canAccessAdminTools={viewModel.canAccessAdminTools}
-              menuOpen={profileMenuOpen}
-              onChangeView={handleChangeView}
-              onCloseMenu={() => setProfileMenuOpen(false)}
-              onToggleMenu={() => setProfileMenuOpen((current) => !current)}
-              onLogout={handleRequestLogout}
-            />
+            {!isCompactMobile ? (
+              <DashboardTopBar
+                currentView={currentView}
+                currentUserName={viewModel.currentUserName}
+                currentUserEmail={viewModel.currentUserEmail}
+                canAccessAdminTools={viewModel.canAccessAdminTools}
+                isCompactMobile={isCompactMobile}
+                menuOpen={profileMenuOpen}
+                onChangeView={handleChangeView}
+                onCloseMenu={() => setProfileMenuOpen(false)}
+                onToggleMenu={() => setProfileMenuOpen((current) => !current)}
+                onLogout={handleRequestLogout}
+              />
+            ) : null}
           </Animated.View>
 
-          <Animated.View
-            style={{
-              opacity: topProgress,
-              transform: [
-                {
-                  translateY: topProgress.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [18, 0],
-                  }),
-                },
-              ],
-            }}
-          >
-            <HeaderCard />
-          </Animated.View>
+          {!isCompactMobile ? (
+            <Animated.View
+              style={{
+                opacity: topProgress,
+                transform: [
+                  {
+                    translateY: topProgress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [18, 0],
+                    }),
+                  },
+                ],
+              }}
+            >
+              <HeaderCard />
+            </Animated.View>
+          ) : null}
 
           <Animated.View
             style={{
@@ -233,15 +259,9 @@ export function DashboardScreen({ viewModel, actions }: DashboardScreenProps) {
                 currentUserName={viewModel.currentUserName}
                 currentUserEmail={viewModel.currentUserEmail}
                 currentConnectionCode={viewModel.currentConnectionCode}
-              />
-            ) : null}
-
-            {currentView === 'settings' ? (
-              <UserSettingsPanel
-                backendBase={viewModel.backendBase}
-                onChangeBackendBase={actions.onChangeBackendBase}
-                onRefreshProfile={actions.onRefreshCurrentUser}
-                onLogout={handleRequestLogout}
+                boundTags={viewModel.profileBoundTags}
+                onLogout={actions.onLogout}
+                showLogout={!viewModel.isDesktopWeb}
               />
             ) : null}
 
@@ -251,6 +271,35 @@ export function DashboardScreen({ viewModel, actions }: DashboardScreenProps) {
 
           </Animated.View>
         </ScrollView>
+
+        {isCompactMobile ? (
+          <View style={styles.mobileBottomNavWrap}>
+            <BlurView intensity={22} tint="light" style={styles.mobileBottomNavBlur} />
+            <View style={styles.mobileBottomNavCard}>
+              <View style={[styles.mobileBottomNavItems, isNarrowMobile && styles.mobileBottomNavItemsWrap]}>
+                {compactMenuItems.map((item) => {
+                  const active = currentView === item.key;
+                  return (
+                    <Pressable
+                      key={item.key}
+                      style={({ pressed }) => [
+                        styles.mobileBottomNavItem,
+                        isNarrowMobile && styles.mobileBottomNavItemHalf,
+                        active ? styles.mobileBottomNavItemActive : null,
+                        pressed ? styles.mobileBottomNavItemPressed : null,
+                      ]}
+                      onPress={() => handleChangeView(item.key)}
+                      >
+                        <Text numberOfLines={1} style={[styles.mobileBottomNavLabel, active ? styles.mobileBottomNavLabelActive : null]}>
+                          {item.label}
+                        </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          </View>
+        ) : null}
 
         <Modal transparent visible={routeLoading} animationType="none">
           <View style={styles.routeLoadingModalRoot}>

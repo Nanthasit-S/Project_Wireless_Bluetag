@@ -20,6 +20,7 @@ export interface UserWithPasswordRecord extends UserRecord {
 
 export interface TagLocationRecord {
   tag_id: string;
+  nickname?: string | null;
   estimated_latitude: number | null;
   estimated_longitude: number | null;
   estimate_source: string | null;
@@ -36,7 +37,7 @@ export interface TagWriteInput {
 
 export interface TagWriteDecision {
   write: boolean;
-  reason: 'new' | 'source_changed' | 'interval_elapsed' | 'throttled_no_coords' | 'moved' | 'throttled';
+  reason: 'new' | 'source_changed' | 'interval_elapsed' | 'same_location_refresh' | 'throttled_no_coords' | 'moved' | 'throttled';
 }
 
 export interface WebIdRecord {

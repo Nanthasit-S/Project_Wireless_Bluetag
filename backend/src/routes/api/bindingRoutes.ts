@@ -16,6 +16,11 @@ export async function bindingRoutes(app: FastifyInstance) {
     );
   });
 
+  app.get('/:tagId/access', { preHandler: [app.authenticate], schema: bindingRouteSchemas.access }, async (request) => {
+    const params = request.params as { tagId: string };
+    return app.di.bindingService.inspectAccess(request.authUser!.sub, normalizeTagId(params.tagId));
+  });
+
   app.delete('/:tagId', { preHandler: [app.authenticate], schema: bindingRouteSchemas.remove }, async (request, reply) => {
     const params = request.params as { tagId: string };
     await app.di.bindingService.remove(request.authUser!.sub, normalizeTagId(params.tagId));
@@ -37,5 +42,10 @@ export async function bindingRoutes(app: FastifyInstance) {
   app.post('/:tagId/technician-reset', { preHandler: [app.authenticate, app.requireAdmin], schema: bindingRouteSchemas.technicianReset }, async (request) => {
     const params = request.params as { tagId: string };
     return app.di.bindingService.technicianReset(request.authUser!.sub, normalizeTagId(params.tagId));
+  });
+
+  app.post('/:tagId/factory-reset', { preHandler: [app.authenticate], schema: bindingRouteSchemas.factoryReset }, async (request) => {
+    const params = request.params as { tagId: string };
+    return app.di.bindingService.factoryReset(request.authUser!.sub, normalizeTagId(params.tagId));
   });
 }

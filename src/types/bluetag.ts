@@ -11,9 +11,11 @@ export type SeenTag = {
 
 export type TagSummary = {
   tag_id: string;
+  nickname?: string | null;
   estimated_latitude: number | null;
   estimated_longitude: number | null;
   estimate_source: string | null;
+  updated_at?: string;
 };
 
 export type WebIdRecord = {
@@ -30,8 +32,17 @@ export type TagBindingRecord = {
   board_synced_at?: string | null;
 };
 
+export type TagBindingAccessRecord = {
+  tag_id: string;
+  access: 'unbound' | 'bound_to_my_web_id' | 'bound_to_other_account';
+  web_id: string | null;
+  board_lock_state?: string | null;
+  board_web_id_hash?: string | null;
+};
+
 export type WebIdTagOverview = {
   tag_id: string;
+  nickname?: string | null;
   web_id: string;
   binding_updated_at: string;
   estimated_latitude: number | null;

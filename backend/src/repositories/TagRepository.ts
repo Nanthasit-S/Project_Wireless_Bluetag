@@ -12,8 +12,13 @@ export interface LocationHistoryRow {
   write_reason: string | null;
 }
 
+export interface TagLocationOwnerRow extends TagLocationRecord {
+  owner_user_id?: string | null;
+}
+
 export interface WebIdTagRow {
   tag_id: string;
+  nickname: string | null;
   web_id: string;
   binding_updated_at: string;
   estimated_latitude: number | null;
@@ -26,10 +31,24 @@ export interface WebIdTagRow {
 export class TagRepository {
   public constructor(private readonly database: PostgresDatabase) {}
 
-  public async findByTagId(tagId: string): Promise<TagLocationRecord | null> {
+  public async findByTagId(tagId: string, ownerUserId: string): Promise<TagLocationRecord | null> {
     const result = await this.database.query<TagLocationRecord>(
       `
-        select tag_id, estimated_latitude, estimated_longitude, estimate_source, updated_at, sample_count
+        select tag_id, nickname, estimated_latitude, estimated_longitude, estimate_source, updated_at, sample_count
+        from tag_locations
+        where tag_id = $1 and owner_user_id = $2
+        limit 1
+      `,
+      [tagId, ownerUserId],
+    );
+
+    return result.rows[0] || null;
+  }
+
+  public async findByTagIdAnyOwner(tagId: string): Promise<TagLocationOwnerRow | null> {
+    const result = await this.database.query<TagLocationOwnerRow>(
+      `
+        select tag_id, nickname, estimated_latitude, estimated_longitude, estimate_source, updated_at, sample_count, owner_user_id
         from tag_locations
         where tag_id = $1
         limit 1
@@ -40,15 +59,16 @@ export class TagRepository {
     return result.rows[0] || null;
   }
 
-  public async listRecent(limit: number): Promise<TagLocationRecord[]> {
+  public async listRecent(limit: number, ownerUserId: string): Promise<TagLocationRecord[]> {
     const result = await this.database.query<TagLocationRecord>(
       `
-        select tag_id, estimated_latitude, estimated_longitude, estimate_source, updated_at, sample_count
+        select tag_id, nickname, estimated_latitude, estimated_longitude, estimate_source, updated_at, sample_count
         from tag_locations
+        where owner_user_id = $2
         order by updated_at desc
         limit $1
       `,
-      [limit],
+      [limit, ownerUserId],
     );
 
     return result.rows;
@@ -56,6 +76,7 @@ export class TagRepository {
 
   public async upsertTagLocation(params: {
     tagId: string;
+    nickname?: string | null;
     estimatedLatitude: number | null;
     estimatedLongitude: number | null;
     estimateSource: string;
@@ -67,6 +88,7 @@ export class TagRepository {
       `
         insert into tag_locations (
           tag_id,
+          nickname,
           estimated_latitude,
           estimated_longitude,
           estimate_source,
@@ -74,18 +96,20 @@ export class TagRepository {
           owner_user_id,
           sample_count
         )
-        values ($1, $2, $3, $4, $5, $6, $7)
+        values ($1, $2, $3, $4, $5, $6, $7, $8)
         on conflict (tag_id) do update set
+          nickname = coalesce(excluded.nickname, tag_locations.nickname),
           estimated_latitude = excluded.estimated_latitude,
           estimated_longitude = excluded.estimated_longitude,
           estimate_source = excluded.estimate_source,
           updated_at = excluded.updated_at,
           owner_user_id = excluded.owner_user_id,
           sample_count = excluded.sample_count
-        returning tag_id, estimated_latitude, estimated_longitude, estimate_source, updated_at, sample_count
+        returning tag_id, nickname, estimated_latitude, estimated_longitude, estimate_source, updated_at, sample_count
       `,
       [
         params.tagId,
+        params.nickname ?? null,
         params.estimatedLatitude,
         params.estimatedLongitude,
         params.estimateSource,
@@ -93,6 +117,35 @@ export class TagRepository {
         params.ownerUserId,
         params.sampleCount,
       ],
+    );
+
+    return result.rows[0];
+  }
+
+  public async updateNickname(params: {
+    tagId: string;
+    nickname: string | null;
+    ownerUserId: string;
+  }): Promise<TagLocationRecord> {
+    const result = await this.database.query<TagLocationRecord>(
+      `
+        insert into tag_locations (
+          tag_id,
+          nickname,
+          estimated_latitude,
+          estimated_longitude,
+          estimate_source,
+          updated_at,
+          owner_user_id,
+          sample_count
+        )
+        values ($1, $2, null, null, null, now(), $3, 0)
+        on conflict (tag_id) do update set
+          nickname = $2,
+          owner_user_id = $3
+        returning tag_id, nickname, estimated_latitude, estimated_longitude, estimate_source, updated_at, sample_count
+      `,
+      [params.tagId, params.nickname, params.ownerUserId],
     );
 
     return result.rows[0];
@@ -145,6 +198,19 @@ export class TagRepository {
         params.writeReason,
       ],
     );
+  }
+
+  public async deleteTagState(tagId: string, ownerUserId: string): Promise<boolean> {
+    const result = await this.database.query<{ tag_id: string }>(
+      `
+        delete from tag_locations
+        where tag_id = $1 and owner_user_id = $2
+        returning tag_id
+      `,
+      [tagId, ownerUserId],
+    );
+
+    return Boolean(result.rowCount);
   }
 
   public async listLocationHistory(params: {
@@ -200,6 +266,7 @@ export class TagRepository {
       `
         select
           b.tag_id,
+          l.nickname,
           b.web_id,
           b.updated_at as binding_updated_at,
           l.estimated_latitude,

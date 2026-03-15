@@ -3,7 +3,10 @@ import type { MutableRefObject } from 'react';
 import type { BleManager, Device } from 'react-native-ble-plx';
 import { Buffer } from 'buffer';
 import {
+  BLE_FACTORY_RESET_OPCODE,
   BLE_RING_UUID,
+  BLE_SLEEP_MODE_OFF_OPCODE,
+  BLE_SLEEP_MODE_ON_OPCODE,
   BLE_SVC_UUID,
   IAS_ALERT_UUID,
   IAS_SVC_UUID,
@@ -17,6 +20,8 @@ interface UseRingControlParams {
   bleReady: boolean;
   isScanning: boolean;
   setIsScanning: (value: boolean) => void;
+  targetTag: string;
+  connectedTagId: string;
   targetSeen: SeenTag | null;
   tags: Record<string, SeenTag>;
   readBatteryFromConnectedDevice: (device: Device, tagId: string) => Promise<number | null>;
@@ -28,20 +33,28 @@ export function useRingControl({
   bleReady,
   isScanning,
   setIsScanning,
+  targetTag,
+  connectedTagId,
   targetSeen,
   tags,
   readBatteryFromConnectedDevice,
   setMessage,
 }: UseRingControlParams) {
+  const COMMAND_BURST_COUNT = 3;
+  const COMMAND_BURST_GAP_MS = 140;
+  const AUTO_RING_CADENCE_MS = 900;
+  const AUTO_RING_OFF_RETRY_MS = 1200;
   const manualOffUntilRef = useRef(0);
   const manualRingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastAutoRingTargetRef = useRef<{ deviceId: string; tagId: string } | null>(null);
+  const lastSleepSyncRef = useRef<{ deviceId: string; enabled: boolean } | null>(null);
   const autoRingRef = useRef<{ inFlight: boolean; lastMode: 0 | 1 | 2 | null; lastSentAt: number }>({
     inFlight: false,
     lastMode: null,
     lastSentAt: 0,
   });
   const batteryReadAtRef = useRef<Record<string, number>>({});
-  const [autoRingEnabled, setAutoRingEnabled] = useState(true);
+  const [autoRingEnabled, setAutoRingEnabled] = useState(false);
 
   function stopManualRingLoop() {
     if (manualRingTimerRef.current) {
@@ -50,8 +63,22 @@ export function useRingControl({
     }
   }
 
+  function resolveCachedTarget() {
+    const normalizedConnectedTagId = connectedTagId.trim().toUpperCase();
+    if (normalizedConnectedTagId && tags[normalizedConnectedTagId]) {
+      return tags[normalizedConnectedTagId];
+    }
+
+    const normalizedTargetTag = targetTag.trim().toUpperCase();
+    if (normalizedTargetTag && tags[normalizedTargetTag]) {
+      return tags[normalizedTargetTag];
+    }
+
+    return null;
+  }
+
   async function writeRing(
-    mode: 0 | 1 | 2,
+    mode: number,
     options?: { silent?: boolean; targetDeviceId?: string; targetTagId?: string },
   ) {
     const explicitTarget =
@@ -61,7 +88,7 @@ export function useRingControl({
             tagId: options.targetTagId ?? options.targetDeviceId,
           }
         : null;
-    const target = explicitTarget ?? targetSeen;
+    const target = explicitTarget ?? targetSeen ?? resolveCachedTarget();
 
     if (!target) {
       setMessage('No target tag selected/found');
@@ -83,7 +110,7 @@ export function useRingControl({
       if (battery != null) {
         batteryReadAtRef.current[target.deviceId] = Date.now();
       }
-      const payload = Buffer.from([mode]).toString('base64');
+      const payload = Buffer.from([mode & 0xff]).toString('base64');
       const services = await d.services();
 
       const candidates: {
@@ -221,6 +248,13 @@ export function useRingControl({
         );
       }
 
+      if (mode === 2) {
+        lastAutoRingTargetRef.current = {
+          deviceId: target.deviceId,
+          tagId: target.tagId,
+        };
+      }
+
       setMessage(`Ring command sent (${mode})`);
       return true;
     } catch (e) {
@@ -237,6 +271,36 @@ export function useRingControl({
     }
   }
 
+  async function burstWriteRing(
+    mode: number,
+    options?: {
+      silent?: boolean;
+      targetDeviceId?: string;
+      targetTagId?: string;
+      count?: number;
+      gapMs?: number;
+    },
+  ) {
+    const count = Math.max(1, Math.min(4, options?.count ?? COMMAND_BURST_COUNT));
+    const gapMs = Math.max(60, options?.gapMs ?? COMMAND_BURST_GAP_MS);
+    let sent = false;
+
+    for (let index = 0; index < count; index += 1) {
+      const ok = await writeRing(mode, {
+        silent: options?.silent ?? index > 0,
+        targetDeviceId: options?.targetDeviceId,
+        targetTagId: options?.targetTagId,
+      });
+      sent = sent || ok;
+
+      if (index < count - 1) {
+        await sleep(gapMs);
+      }
+    }
+
+    return sent;
+  }
+
   async function forceRingOff() {
     stopManualRingLoop();
     autoRingRef.current.inFlight = false;
@@ -248,15 +312,16 @@ export function useRingControl({
 
     let sent = false;
     if (targets.length > 0) {
-      for (let round = 0; round < 3; round += 1) {
-        for (const t of targets) {
-          const ok = await writeRing(0, { silent: true, targetDeviceId: t.deviceId, targetTagId: t.tagId });
-          sent = sent || ok;
-        }
-        await sleep(120);
+      for (const t of targets) {
+        const ok = await burstWriteRing(0, {
+          silent: true,
+          targetDeviceId: t.deviceId,
+          targetTagId: t.tagId,
+        });
+        sent = sent || ok;
       }
     } else {
-      sent = await writeRing(0, { silent: true });
+      sent = await burstWriteRing(0, { silent: true });
     }
 
     setMessage(sent ? 'Ring OFF' : 'Ring OFF failed');
@@ -273,7 +338,13 @@ export function useRingControl({
   function handleToggleAutoRing() {
     setAutoRingEnabled((prev) => {
       const next = !prev;
-      if (next) stopManualRingLoop();
+      if (next) {
+        stopManualRingLoop();
+        manualOffUntilRef.current = 0;
+        autoRingRef.current.inFlight = false;
+        autoRingRef.current.lastMode = null;
+        autoRingRef.current.lastSentAt = 0;
+      }
       if (!next) {
         void forceRingOff();
       }
@@ -281,14 +352,62 @@ export function useRingControl({
     });
   }
 
+  async function syncSleepModeForTarget(enabled: boolean, explicitTarget?: { deviceId: string; tagId: string } | null) {
+    const target =
+      explicitTarget ??
+      targetSeen ??
+      lastAutoRingTargetRef.current;
+
+    if (!target) return false;
+    if (
+      lastSleepSyncRef.current?.deviceId === target.deviceId &&
+      lastSleepSyncRef.current.enabled === enabled
+    ) {
+      return true;
+    }
+
+    const opcode = enabled ? BLE_SLEEP_MODE_OFF_OPCODE : BLE_SLEEP_MODE_ON_OPCODE;
+    const ok = await burstWriteRing(opcode, {
+      silent: true,
+      targetDeviceId: target.deviceId,
+      targetTagId: target.tagId,
+    });
+
+    if (ok) {
+      lastSleepSyncRef.current = {
+        deviceId: target.deviceId,
+        enabled,
+      };
+      setMessage(enabled ? 'Auto Ring active -> keep board awake' : 'Auto Ring off -> board can sleep');
+    }
+    return ok;
+  }
+
   function handleManualRing(mode: 1 | 2) {
     stopManualRingLoop();
     setAutoRingEnabled(false);
-    const intervalMs = mode === 2 ? 900 : 1800;
-    void writeRing(mode);
+    const intervalMs = mode === 2 ? 600 : 1400;
+    void burstWriteRing(mode, { count: 3 });
     manualRingTimerRef.current = setInterval(() => {
-      void writeRing(mode, { silent: true });
+      void burstWriteRing(mode, { silent: true, count: 2, gapMs: 110 });
     }, intervalMs);
+  }
+
+  async function handleFactoryReset(targetDeviceId?: string, targetTagId?: string) {
+    stopManualRingLoop();
+    autoRingRef.current.inFlight = false;
+    autoRingRef.current.lastMode = null;
+    autoRingRef.current.lastSentAt = 0;
+
+    const ok = await burstWriteRing(BLE_FACTORY_RESET_OPCODE, {
+      silent: false,
+      targetDeviceId,
+      targetTagId,
+    });
+    if (ok) {
+      setMessage(`Factory reset sent to ${targetTagId ?? targetSeen?.tagId ?? 'BlueTag'}`);
+    }
+    return ok;
   }
 
   useEffect(() => {
@@ -299,13 +418,21 @@ export function useRingControl({
       const now = Date.now();
       if (autoRingRef.current.inFlight) return;
       if (!isScanning || !targetSeen) {
-        if (autoRingRef.current.lastMode !== 0 || now - autoRingRef.current.lastSentAt > 3000) {
+        if (autoRingRef.current.lastMode !== 0 || now - autoRingRef.current.lastSentAt > AUTO_RING_OFF_RETRY_MS) {
           autoRingRef.current.inFlight = true;
           try {
-            const ok = await writeRing(0, { silent: true });
+            const fallbackTarget = lastAutoRingTargetRef.current;
+            const ok = await burstWriteRing(0, {
+              silent: true,
+              targetDeviceId: fallbackTarget?.deviceId,
+              targetTagId: fallbackTarget?.tagId,
+              count: 2,
+              gapMs: 100,
+            });
             if (ok) {
               autoRingRef.current.lastMode = 0;
               autoRingRef.current.lastSentAt = Date.now();
+              lastAutoRingTargetRef.current = null;
             }
           } finally {
             autoRingRef.current.inFlight = false;
@@ -314,7 +441,7 @@ export function useRingControl({
         return;
       }
 
-      const intervalMs = 900;
+      const intervalMs = AUTO_RING_CADENCE_MS;
       const shouldSendByInterval = now - autoRingRef.current.lastSentAt >= intervalMs;
       const modeChanged = autoRingRef.current.lastMode !== 2;
       if (!shouldSendByInterval && !modeChanged) return;
@@ -335,16 +462,21 @@ export function useRingControl({
     void tick();
     const timer = setInterval(() => {
       void tick();
-    }, 900);
+    }, AUTO_RING_CADENCE_MS);
 
     return () => clearInterval(timer);
   }, [autoRingEnabled, bleReady, isScanning, targetSeen]);
+
+  useEffect(() => {
+    if (!bleReady) return;
+    void syncSleepModeForTarget(autoRingEnabled);
+  }, [autoRingEnabled, bleReady, targetSeen]);
 
   useEffect(() => () => stopManualRingLoop(), []);
 
   function resetRingControl() {
     stopManualRingLoop();
-    setAutoRingEnabled(true);
+    setAutoRingEnabled(false);
   }
 
   return {
@@ -352,6 +484,8 @@ export function useRingControl({
     handleToggleAutoRing,
     handleManualOff,
     handleManualRing,
+    handleFactoryReset,
+    syncSleepModeForTarget,
     resetRingControl,
   };
 }

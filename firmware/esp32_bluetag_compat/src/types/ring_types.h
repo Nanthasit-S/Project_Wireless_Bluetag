@@ -13,5 +13,6 @@ struct RingState {
   bool toneOn = false;
   uint32_t toneNextToggleAtMs = 0;
   uint32_t toneNextHopAtMs = 0;
+  uint32_t toneLeaseExpiresAtMs = 0;
   bool useAltFreq = false;
 };

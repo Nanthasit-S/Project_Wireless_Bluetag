@@ -9,6 +9,7 @@ interface DashboardTopBarProps {
   currentUserName?: string;
   currentUserEmail?: string;
   canAccessAdminTools: boolean;
+  isCompactMobile: boolean;
   menuOpen: boolean;
   onChangeView: (view: DashboardView) => void;
   onCloseMenu: () => void;
@@ -21,7 +22,6 @@ const MENU_WIDTH = 290;
 const defaultMenuItems: Array<{ key: DashboardView; label: string; hint: string }> = [
   { key: 'dashboard', label: 'หน้าหลัก', hint: 'ดูแท็กและภาพรวมทั้งหมด' },
   { key: 'profile', label: 'โปรไฟล์', hint: 'ดูข้อมูลบัญชีที่ใช้อยู่' },
-  { key: 'settings', label: 'ตั้งค่า', hint: 'จัดการค่าการเชื่อมต่อและระบบ' },
 ];
 
 const adminMenuItem: { key: DashboardView; label: string; hint: string } = {
@@ -50,8 +50,6 @@ function getCurrentViewLabel(view: DashboardView) {
       return 'หน้าหลัก';
     case 'profile':
       return 'โปรไฟล์';
-    case 'settings':
-      return 'ตั้งค่า';
     case 'admin':
     default:
       return 'แอดมิน';
@@ -63,6 +61,7 @@ export function DashboardTopBar({
   currentUserName,
   currentUserEmail,
   canAccessAdminTools,
+  isCompactMobile,
   menuOpen,
   onChangeView,
   onCloseMenu,
@@ -96,6 +95,15 @@ export function DashboardTopBar({
       return;
     }
 
+    if (isCompactMobile) {
+      setMenuPosition({
+        top: 92,
+        left: 16,
+      });
+      onToggleMenu();
+      return;
+    }
+
     buttonRef.current?.measureInWindow((x, y, width, height) => {
       const nextLeft = Math.min(Math.max(12, x + width - MENU_WIDTH), Math.max(12, screenWidth - MENU_WIDTH - 12));
 
@@ -108,16 +116,16 @@ export function DashboardTopBar({
   };
 
   return (
-    <View style={styles.topBar}>
-      <View style={styles.topBarMeta}>
-        <Text style={styles.topBarTitle}>BlueTag</Text>
-        <Text style={styles.topBarCopy}>ดูแท็ก เช็กข้อมูล แล้วสลับไปดูโปรไฟล์ ตั้งค่า หรือหน้าแอดมินได้จากเมนูมุมขวาบน</Text>
+    <View style={[styles.topBar, isCompactMobile && styles.topBarMobile]}>
+      <View style={[styles.topBarMeta, isCompactMobile && styles.topBarMetaMobile]}>
       </View>
 
-      <View ref={buttonRef} style={styles.profileMenuShell}>
+      {isCompactMobile ? null : (
+      <View ref={buttonRef} style={[styles.profileMenuShell, isCompactMobile && styles.profileMenuShellMobile]}>
         <Pressable
           style={({ pressed }) => [
             styles.profileMenuButton,
+            isCompactMobile && styles.profileMenuButtonMobile,
             menuOpen ? styles.profileMenuButtonActive : null,
             pressed ? styles.profileMenuButtonPressed : null,
           ]}
@@ -141,8 +149,14 @@ export function DashboardTopBar({
             <View style={styles.profileMenuShadeLayer} />
             <Pressable style={styles.profileMenuCloseLayer} onPress={onCloseMenu} />
 
-            <Pressable style={[styles.profileMenuModalShell, { top: menuPosition.top, left: menuPosition.left }]} onPress={() => undefined}>
-              <View style={styles.profileMenuCard}>
+            <Pressable
+              style={[
+                styles.profileMenuModalShell,
+                isCompactMobile ? styles.profileMenuModalShellMobile : { top: menuPosition.top, left: menuPosition.left },
+              ]}
+              onPress={() => undefined}
+            >
+              <View style={[styles.profileMenuCard, isCompactMobile && styles.profileMenuCardMobile]}>
                 <View style={styles.profileMenuHeader}>
                   <View style={styles.profileAvatarLarge}>
                     <Text style={styles.profileAvatarLargeText}>{initials}</Text>
@@ -199,6 +213,7 @@ export function DashboardTopBar({
           </View>
         </Modal>
       </View>
+      )}
     </View>
   );
 }

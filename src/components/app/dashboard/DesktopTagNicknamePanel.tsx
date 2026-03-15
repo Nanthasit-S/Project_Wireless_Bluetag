@@ -2,6 +2,7 @@ import { BlurView } from 'expo-blur';
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { TagOptionViewModel } from '../../../types/appViewModels';
+import { formatThaiDateTime } from '../../../utils/time';
 
 interface DesktopTagNicknamePanelProps {
   tags: TagOptionViewModel[];
@@ -12,17 +13,7 @@ interface DesktopTagNicknamePanelProps {
 
 function formatLastSeen(value: string) {
   if (!value || value === '-') return 'ยังไม่มีเวลาอัปเดต';
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-
-  return parsed.toLocaleString('th-TH', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatThaiDateTime(value);
 }
 
 export function DesktopTagNicknamePanel({
@@ -134,6 +125,9 @@ export function DesktopTagNicknamePanel({
               </Text>
               <Text className="text-sm text-slate-500" style={styles.body}>
                 {selectedTag.tagId}
+              </Text>
+              <Text className="text-sm text-slate-600" style={styles.body}>
+                ชื่อเล่น: {selectedTag.name?.trim() ? selectedTag.name : 'ยังไม่ได้ตั้งชื่อเล่น'}
               </Text>
             </View>
 

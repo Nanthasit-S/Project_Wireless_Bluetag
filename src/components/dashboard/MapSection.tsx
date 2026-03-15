@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { WebView } from 'react-native-webview';
 
 type MapMarkerItem = {
@@ -44,6 +44,8 @@ export function MapSection({
   onSelectTag,
   isLoading = false,
 }: MapSectionProps) {
+  const { width } = useWindowDimensions();
+  const isCompactMobile = Platform.OS !== 'web' && width < 420;
   const markerPalette = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'];
 
   useEffect(() => {
@@ -104,7 +106,17 @@ export function MapSection({
       (function () {
         const data = ${payload};
         const markers = Array.isArray(data.markers) && data.markers.length ? data.markers : [
-          { tagId: "BTAG-000001", name: "BlueTag", latitude: data.lat, longitude: data.lng, rssi: -120, battery: null, lastSeen: "-", source: "fallback", color: "#ef4444" }
+          {
+            tagId: data.selectedTagId || "BTAG-MAP-FALLBACK",
+            name: data.selectedTagId || "BlueTag",
+            latitude: data.lat,
+            longitude: data.lng,
+            rssi: -120,
+            battery: null,
+            lastSeen: "-",
+            source: "fallback",
+            color: "#ef4444"
+          }
         ];
         const trackedMarker = markers.find((m) => m.tagId === data.selectedTagId) || null;
         const centerLat = trackedMarker ? trackedMarker.latitude : data.lat;
@@ -178,11 +190,11 @@ export function MapSection({
   return (
     <View className="rounded-[30px] border border-slate-200 bg-white/95 p-4 gap-4">
       <View className="gap-1">
-        <Text className="text-[26px] font-bold text-slate-950" style={styles.heading}>
+        <Text className="text-[26px] font-bold text-slate-950" style={[styles.heading, isCompactMobile && styles.headingCompact]}>
           แผนที่หลัก
         </Text>
         <Text className="text-sm text-slate-500" style={styles.body}>
-          เลือก BlueTag จากฝั่งขวา แล้วแผนที่จะโฟกัสตามให้เอง
+          {isCompactMobile ? 'แตะเลือกแท็กแล้วแผนที่จะโฟกัสให้เอง' : 'เลือก BlueTag จากฝั่งขวา แล้วแผนที่จะโฟกัสตามให้เอง'}
         </Text>
       </View>
 
@@ -194,7 +206,7 @@ export function MapSection({
         </View>
       ) : (
         <WebView
-          style={styles.map}
+          style={[styles.map, isCompactMobile && styles.mapCompact]}
           originWhitelist={['*']}
           source={{ html: mapHtml }}
           javaScriptEnabled
@@ -226,6 +238,9 @@ const styles = StyleSheet.create({
   heading: {
     fontFamily: 'Sarabun_700Bold',
   },
+  headingCompact: {
+    fontSize: 22,
+  },
   body: {
     fontFamily: 'Sarabun_400Regular',
   },
@@ -236,6 +251,9 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 320,
     borderRadius: 16,
+  },
+  mapCompact: {
+    height: 260,
   },
   webMapWrap: {
     width: '100%',
