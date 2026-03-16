@@ -9,6 +9,15 @@
 
 namespace {
 
+float batteryDividerScale() {
+  const float top = static_cast<float>(BlueTagConfig::kBatteryDividerTopOhms);
+  const float bottom = static_cast<float>(BlueTagConfig::kBatteryDividerBottomOhms);
+  if (bottom <= 0.0f) {
+    return 1.0f;
+  }
+  return (top + bottom) / bottom;
+}
+
 uint8_t batteryPercentFromCurve(float batteryMv) {
   struct BatteryPoint {
     float mv;
@@ -272,15 +281,16 @@ void BlueTagBleServer::loadBindingState() {
   stored.trim();
   stored.toUpperCase();
   boundWebIdHash_ = stored.c_str();
-  sleepModeEnabled_ = preferences_.getBool(
-      BlueTagConfig::kSleepModeEnabledKey,
-      BlueTagConfig::kSleepModeDefaultEnabled);
+  sleepModeEnabled_ = false;
+  preferences_.putBool(BlueTagConfig::kSleepModeEnabledKey, false);
 }
 
 bool BlueTagBleServer::setSleepModeEnabled(bool enabled) {
-  sleepModeEnabled_ = enabled;
+  (void)enabled;
+  sleepModeEnabled_ = false;
   noteActivity(BlueTagConfig::kBurstAdvertisingWindowMs * 4);
-  return preferences_.putBool(BlueTagConfig::kSleepModeEnabledKey, enabled);
+  preferences_.putBool(BlueTagConfig::kSleepModeEnabledKey, false);
+  return false;
 }
 
 std::string BlueTagBleServer::resolveWebIdHash(const String& webId) const {
@@ -308,11 +318,6 @@ void BlueTagBleServer::update() {
     restartAdvertisingNow();
   }
 
-  if (canEnterTimedLightSleep() && static_cast<int32_t>(now - stayAwakeUntilMs_) >= 0) {
-    enterTimedLightSleep();
-    return;
-  }
-
   if (now < nextBatterySampleAtMs_) {
     return;
   }
@@ -327,20 +332,6 @@ uint32_t BlueTagBleServer::nextBatteryUpdateIntervalMs() const {
 
 void BlueTagBleServer::noteActivity(uint32_t extendMs) {
   stayAwakeUntilMs_ = millis() + extendMs;
-}
-
-bool BlueTagBleServer::canEnterTimedLightSleep() const {
-  return sleepModeEnabled_ && !centralConnected_ && ring_.currentMode() == RingMode::Off;
-}
-
-void BlueTagBleServer::enterTimedLightSleep() {
-  Serial.printf("[POWER] Enter light sleep for %lu ms\n", static_cast<unsigned long>(BlueTagConfig::kLightSleepIntervalMs));
-  Serial.flush();
-  BLEDevice::stopAdvertising();
-  esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(BlueTagConfig::kLightSleepIntervalMs) * 1000ULL);
-  esp_light_sleep_start();
-  noteActivity();
-  scheduleAdvertisingRestart(0);
 }
 
 BlueTagBleServer::RingCharacteristicCallbacks::RingCharacteristicCallbacks(BlueTagBleServer& parent)
@@ -391,16 +382,16 @@ void BlueTagBleServer::handleRingWrite(const std::string& value) {
   }
 
   if (modeByte == 0xA0) {
-    setSleepModeEnabled(false);
+    sleepModeEnabled_ = false;
     publishMode();
     Serial.println("[POWER] sleep mode disabled by BLE");
     return;
   }
 
   if (modeByte == 0xA1) {
-    setSleepModeEnabled(true);
+    sleepModeEnabled_ = false;
     publishMode();
-    Serial.println("[POWER] sleep mode enabled by BLE");
+    Serial.println("[POWER] sleep mode is removed; ON ignored");
     return;
   }
 
@@ -587,7 +578,7 @@ uint32_t BlueTagBleServer::readBatteryMilliVolts() const {
 
   const float measuredMv = static_cast<float>(trimmedSum) / static_cast<float>(trimmedCount);
   const float batteryMv =
-      (measuredMv * BlueTagConfig::kBatteryAdcScale) + static_cast<float>(BlueTagConfig::kBatteryAdcOffsetMv);
+      (measuredMv * batteryDividerScale()) + static_cast<float>(BlueTagConfig::kBatteryAdcOffsetMv);
   return static_cast<uint32_t>(std::max(0, static_cast<int>(batteryMv + 0.5f)));
 }
 
@@ -602,11 +593,12 @@ void BlueTagBleServer::publishBattery(bool notify) {
 
   const uint32_t batteryMv = readBatteryMilliVolts();
   const uint8_t batteryPercent = batteryPercentFromCurve(static_cast<float>(batteryMv));
-  if (batteryPercent == lastBatteryPercent_ && !notify) {
+  if (batteryPercent == lastBatteryPercent_ && batteryMv == lastBatteryMilliVolts_ && !notify) {
     return;
   }
 
   lastBatteryPercent_ = batteryPercent;
+  lastBatteryMilliVolts_ = batteryMv;
   batteryChar_->setValue(&lastBatteryPercent_, 1);
   publishAdvertisingPayload();
   Serial.printf("[BATTERY] percent=%u mv=%lu\n",
@@ -624,6 +616,7 @@ void BlueTagBleServer::printSerialSummary(Stream& stream) const {
   stream.printf("LOCK_STATE=%s\n", boundWebIdHash_.empty() ? "UNBOUND" : "LOCKED");
   stream.printf("SLEEP_MODE=%s\n", sleepModeEnabled_ ? "ON" : "OFF");
   stream.printf("BATTERY=%u\n", static_cast<unsigned>(lastBatteryPercent_));
+  stream.printf("BATTERY_MV=%lu\n", static_cast<unsigned long>(lastBatteryMilliVolts_));
   stream.printf("DEVICE_NAME=%s\n", BlueTagConfig::kLegacyAdvertisedName);
   stream.printf("SERVICE_1910=%s\n", BlueTagConfig::kServiceUuid);
   stream.printf("CHAR_2B10=%s\n", BlueTagConfig::kRingCharPrimaryUuid);

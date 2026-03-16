@@ -74,20 +74,14 @@ void handleSerialCommand(String command) {
   }
 
   if (command == "SLEEP ON") {
-    if (gBle.setSleepModeEnabled(true)) {
-      Serial.println("SLEEP_MODE=ON");
-    } else {
-      Serial.println("SLEEP_MODE_ERROR");
-    }
+    gBle.setSleepModeEnabled(false);
+    Serial.println("SLEEP_MODE_REMOVED");
     return;
   }
 
   if (command == "SLEEP OFF") {
-    if (gBle.setSleepModeEnabled(false)) {
-      Serial.println("SLEEP_MODE=OFF");
-    } else {
-      Serial.println("SLEEP_MODE_ERROR");
-    }
+    gBle.setSleepModeEnabled(false);
+    Serial.println("SLEEP_MODE=OFF");
     return;
   }
 
