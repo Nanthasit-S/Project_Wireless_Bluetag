@@ -120,6 +120,7 @@ export type LocalTagLocation = {
   tagId: string;
   latitude: number;
   longitude: number;
+  battery?: number | null;
   updatedAt: string;
 };
 

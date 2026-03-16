@@ -44,10 +44,13 @@ export function useRingControl({
   const COMMAND_BURST_GAP_MS = 140;
   const AUTO_RING_CADENCE_MS = 900;
   const AUTO_RING_OFF_RETRY_MS = 1200;
+  const AUTO_RING_TARGET_GRACE_MS = 12000;
   const manualOffUntilRef = useRef(0);
   const manualRingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastAutoRingTargetRef = useRef<{ deviceId: string; tagId: string } | null>(null);
+  const lastAutoRingSeenAtRef = useRef(0);
   const lastSleepSyncRef = useRef<{ deviceId: string; enabled: boolean } | null>(null);
+  const autoRingSessionRef = useRef(0);
   const autoRingRef = useRef<{ inFlight: boolean; lastMode: 0 | 1 | 2 | null; lastSentAt: number }>({
     inFlight: false,
     lastMode: null,
@@ -72,6 +75,47 @@ export function useRingControl({
     const normalizedTargetTag = targetTag.trim().toUpperCase();
     if (normalizedTargetTag && tags[normalizedTargetTag]) {
       return tags[normalizedTargetTag];
+    }
+
+    return null;
+  }
+
+  function resolveRecentAutoRingTarget(now = Date.now()) {
+    if (targetSeen) {
+      lastAutoRingTargetRef.current = {
+        deviceId: targetSeen.deviceId,
+        tagId: targetSeen.tagId,
+      };
+      lastAutoRingSeenAtRef.current = now;
+      return targetSeen;
+    }
+
+    const lastTarget = lastAutoRingTargetRef.current;
+    if (!lastTarget) return null;
+
+    const byTagId = tags[lastTarget.tagId];
+    if (byTagId && now - byTagId.lastSeenMs <= AUTO_RING_TARGET_GRACE_MS) {
+      lastAutoRingSeenAtRef.current = now;
+      return byTagId;
+    }
+
+    const byDeviceId = Object.values(tags).find((tag) => tag.deviceId === lastTarget.deviceId);
+    if (byDeviceId && now - byDeviceId.lastSeenMs <= AUTO_RING_TARGET_GRACE_MS) {
+      lastAutoRingSeenAtRef.current = now;
+      return byDeviceId;
+    }
+
+    if (now - lastAutoRingSeenAtRef.current <= AUTO_RING_TARGET_GRACE_MS) {
+      return {
+        deviceId: lastTarget.deviceId,
+        tagId: lastTarget.tagId,
+        name: lastTarget.tagId,
+        rssi: -85,
+        battery: null,
+        counter: null,
+        lastSeen: 'recent',
+        lastSeenMs: lastAutoRingSeenAtRef.current,
+      };
     }
 
     return null;
@@ -301,7 +345,7 @@ export function useRingControl({
     return sent;
   }
 
-  async function forceRingOff() {
+  async function forceRingOff(sessionId?: number) {
     stopManualRingLoop();
     autoRingRef.current.inFlight = false;
     autoRingRef.current.lastMode = 0;
@@ -313,6 +357,9 @@ export function useRingControl({
     let sent = false;
     if (targets.length > 0) {
       for (const t of targets) {
+        if (sessionId != null && sessionId !== autoRingSessionRef.current) {
+          return;
+        }
         const ok = await burstWriteRing(0, {
           silent: true,
           targetDeviceId: t.deviceId,
@@ -321,6 +368,9 @@ export function useRingControl({
         sent = sent || ok;
       }
     } else {
+      if (sessionId != null && sessionId !== autoRingSessionRef.current) {
+        return;
+      }
       sent = await burstWriteRing(0, { silent: true });
     }
 
@@ -338,15 +388,37 @@ export function useRingControl({
   function handleToggleAutoRing() {
     setAutoRingEnabled((prev) => {
       const next = !prev;
+      autoRingSessionRef.current += 1;
       if (next) {
         stopManualRingLoop();
         manualOffUntilRef.current = 0;
         autoRingRef.current.inFlight = false;
         autoRingRef.current.lastMode = null;
         autoRingRef.current.lastSentAt = 0;
+        const immediateTarget = targetSeen ?? resolveCachedTarget() ?? lastAutoRingTargetRef.current;
+        if (immediateTarget) {
+          void burstWriteRing(2, {
+            silent: true,
+            targetDeviceId: immediateTarget.deviceId,
+            targetTagId: immediateTarget.tagId,
+            count: 2,
+            gapMs: 110,
+          }).then((ok) => {
+            if (!ok) return;
+            if (autoRingSessionRef.current == null) return;
+            autoRingRef.current.lastMode = 2;
+            autoRingRef.current.lastSentAt = Date.now();
+            lastAutoRingTargetRef.current = {
+              deviceId: immediateTarget.deviceId,
+              tagId: immediateTarget.tagId,
+            };
+            lastAutoRingSeenAtRef.current = Date.now();
+            setMessage(`Auto ring FAST | ${immediateTarget.tagId} | immediate resume`);
+          });
+        }
       }
       if (!next) {
-        void forceRingOff();
+        void forceRingOff(autoRingSessionRef.current);
       }
       return next;
     });
@@ -416,8 +488,9 @@ export function useRingControl({
     const tick = async () => {
       if (Date.now() < manualOffUntilRef.current) return;
       const now = Date.now();
+      const effectiveTarget = resolveRecentAutoRingTarget(now);
       if (autoRingRef.current.inFlight) return;
-      if (!isScanning || !targetSeen) {
+      if (!effectiveTarget) {
         if (autoRingRef.current.lastMode !== 0 || now - autoRingRef.current.lastSentAt > AUTO_RING_OFF_RETRY_MS) {
           autoRingRef.current.inFlight = true;
           try {
@@ -448,11 +521,22 @@ export function useRingControl({
 
       autoRingRef.current.inFlight = true;
       try {
-        const ok = await writeRing(2, { silent: true });
+        const ok = await burstWriteRing(2, {
+          silent: true,
+          targetDeviceId: effectiveTarget.deviceId,
+          targetTagId: effectiveTarget.tagId,
+          count: 2,
+          gapMs: 110,
+        });
         if (ok) {
           autoRingRef.current.lastMode = 2;
           autoRingRef.current.lastSentAt = Date.now();
-          setMessage(`Auto ring FAST | ${targetSeen.tagId} | RSSI ${targetSeen.rssi}`);
+          lastAutoRingTargetRef.current = {
+            deviceId: effectiveTarget.deviceId,
+            tagId: effectiveTarget.tagId,
+          };
+          lastAutoRingSeenAtRef.current = Date.now();
+          setMessage(`Auto ring FAST | ${effectiveTarget.tagId} | RSSI ${effectiveTarget.rssi}`);
         }
       } finally {
         autoRingRef.current.inFlight = false;
@@ -465,7 +549,7 @@ export function useRingControl({
     }, AUTO_RING_CADENCE_MS);
 
     return () => clearInterval(timer);
-  }, [autoRingEnabled, bleReady, isScanning, targetSeen]);
+  }, [autoRingEnabled, bleReady, targetSeen, tags]);
 
   useEffect(() => {
     if (!bleReady) return;

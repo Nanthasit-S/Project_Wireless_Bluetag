@@ -16,6 +16,8 @@ import {
 
 const BLE_ACTIVE_WINDOW_MS = 4500;
 const BLE_UI_RETENTION_MS = 60000;
+const BLE_SCAN_RESTART_MS = 12000;
+const BLE_SCAN_RESTART_IDLE_MS = 15000;
 
 function toBlueTagDisplayName(tagId: string) {
   const suffix = tagId.replace(/^BTAG[-_]?/i, '').trim();
@@ -29,6 +31,7 @@ export function useBleScanner() {
   const lastLocationFetchAtRef = useRef(0);
   const batteryReadAtRef = useRef<Record<string, number>>({});
   const batteryReadInFlightRef = useRef<Record<string, boolean>>({});
+  const lastBlueTagSeenAtRef = useRef(0);
 
   const [bleReady, setBleReady] = useState(false);
   const [bleState, setBleState] = useState('Unknown');
@@ -124,6 +127,7 @@ export function useBleScanner() {
 
     const restartTimer = setInterval(() => {
       if (!managerRef.current) return;
+      if (Date.now() - lastBlueTagSeenAtRef.current <= BLE_SCAN_RESTART_IDLE_MS) return;
 
       try {
         managerRef.current.stopDeviceScan();
@@ -132,72 +136,19 @@ export function useBleScanner() {
       }
 
       managerRef.current.startDeviceScan(null, { allowDuplicates: true }, (error, device) => {
-        if (error) {
-          setMessage(`สแกนไม่สำเร็จ: ${error.message}`);
-          setIsScanning(false);
-          return;
-        }
-        if (!device) return;
-
-        if (!loggedDeviceIdsRef.current[device.id]) {
-          loggedDeviceIdsRef.current[device.id] = true;
-          console.log('[BLE_SCAN_RAW]', {
-            id: device.id,
-            name: device.name ?? '',
-            localName: device.localName ?? '',
-            serviceUUIDs: device.serviceUUIDs ?? [],
-            manufacturerData: device.manufacturerData ? `${device.manufacturerData.slice(0, 40)}...` : '',
-            rssi: device.rssi ?? null,
-          });
-        }
-
-        const parsed = parseBlueTagManufacturerData(device.manufacturerData);
-        const inferredTagId = inferTagIdFromDevice(device);
-        const serviceMatched = hasKnownRingService(device);
-        const nameMatched = looksLikeBlueTagName(device);
-        const cachedTagId = knownDeviceToTagRef.current[device.id];
-        const tagId =
-          inferredTagId ??
-          parsed?.tagId ??
-          cachedTagId ??
-          (serviceMatched || nameMatched ? deriveStableTagId(device.id || device.name || device.localName || '') : null);
-
-        if (!tagId) return;
-
-        knownDeviceToTagRef.current[device.id] = tagId;
-        void captureLocalTagLocation(tagId);
-        if (parsed?.battery == null) {
-          void refreshBatteryForTag(device.id, tagId);
-        }
-
-        setTags((prev) => {
-          const prevTag = prev[tagId];
-          const nextRssiRaw = device.rssi ?? -120;
-          const smoothedRssi = prevTag ? Math.round(prevTag.rssi * 0.7 + nextRssiRaw * 0.3) : nextRssiRaw;
-          const fallbackName = toBlueTagDisplayName(tagId);
-
-          return {
-            ...prev,
-            [tagId]: {
-              deviceId: device.id,
-              tagId,
-              name: tagNicknames[tagId] || prevTag?.name || device.name || device.localName || fallbackName,
-              rssi: smoothedRssi,
-              battery: parsed?.battery ?? prevTag?.battery ?? null,
-              counter: parsed?.counter ?? prevTag?.counter ?? null,
-              lastSeen: formatThaiTime(new Date()),
-              lastSeenMs: Date.now(),
-            },
-          };
-        });
+        handleDiscoveredDevice(error, device, false);
       });
-    }, 12000);
+    }, BLE_SCAN_RESTART_MS);
 
     return () => clearInterval(restartTimer);
   }, [isScanning, tagNicknames]);
 
   async function persistTagNicknames(nextNicknames: Record<string, string>) {
     setTagNicknames(nextNicknames);
+  }
+
+  function prevTagBattery(tagId: string) {
+    return tags[tagId]?.battery ?? localTagLocations[tagId]?.battery ?? null;
   }
 
   async function setTagNickname(tagId: string, nickname: string) {
@@ -236,7 +187,7 @@ export function useBleScanner() {
     return Object.values(perms).every((value) => value === PermissionsAndroid.RESULTS.GRANTED);
   }
 
-  async function captureLocalTagLocation(tagId: string) {
+  async function captureLocalTagLocation(tagId: string, battery: number | null = null) {
     if (Platform.OS === 'web') return;
     const now = Date.now();
     if (now - lastLocationFetchAtRef.current < 5000) return;
@@ -259,6 +210,7 @@ export function useBleScanner() {
           tagId,
           latitude: pos.coords.latitude,
           longitude: pos.coords.longitude,
+          battery,
           updatedAt: formatThaiTime(new Date()),
         },
       }));
@@ -358,74 +310,81 @@ export function useBleScanner() {
     setIsScanning(true);
 
     managerRef.current.startDeviceScan(null, { allowDuplicates: true }, (error, device) => {
-      if (error) {
-        setMessage(`สแกนไม่สำเร็จ: ${error.message}`);
-        setIsScanning(false);
-        return;
-      }
-      if (!device) return;
+      handleDiscoveredDevice(error, device, true);
+    });
+  }
 
-      if (!loggedDeviceIdsRef.current[device.id]) {
-        loggedDeviceIdsRef.current[device.id] = true;
-        console.log('[BLE_SCAN_RAW]', {
-          id: device.id,
-          name: device.name ?? '',
-          localName: device.localName ?? '',
-          serviceUUIDs: device.serviceUUIDs ?? [],
-          manufacturerData: device.manufacturerData ? `${device.manufacturerData.slice(0, 40)}...` : '',
-          rssi: device.rssi ?? null,
-        });
-      }
+  function handleDiscoveredDevice(error: Error | null, device: Device | null, allowBatteryProbe: boolean) {
+    if (error) {
+      setMessage(`สแกนไม่สำเร็จ: ${error.message}`);
+      setIsScanning(false);
+      return;
+    }
+    if (!device) return;
 
-      const parsed = parseBlueTagManufacturerData(device.manufacturerData);
-      const inferredTagId = inferTagIdFromDevice(device);
-      const serviceMatched = hasKnownRingService(device);
-      const nameMatched = looksLikeBlueTagName(device);
-      const cachedTagId = knownDeviceToTagRef.current[device.id];
-      const tagId =
-        inferredTagId ??
-        parsed?.tagId ??
-        cachedTagId ??
-        (serviceMatched || nameMatched ? deriveStableTagId(device.id || device.name || device.localName || '') : null);
-
-      if (!tagId) return;
-
-      console.log('[BLE_SCAN_MATCH]', {
+    if (!loggedDeviceIdsRef.current[device.id]) {
+      loggedDeviceIdsRef.current[device.id] = true;
+      console.log('[BLE_SCAN_RAW]', {
         id: device.id,
-        tagId,
-        inferredTagId,
-        parsedTagId: parsed?.tagId ?? null,
-        serviceMatched,
-        nameMatched,
+        name: device.name ?? '',
+        localName: device.localName ?? '',
+        serviceUUIDs: device.serviceUUIDs ?? [],
+        manufacturerData: device.manufacturerData ? `${device.manufacturerData.slice(0, 40)}...` : '',
         rssi: device.rssi ?? null,
       });
+    }
 
-      knownDeviceToTagRef.current[device.id] = tagId;
-      void captureLocalTagLocation(tagId);
-      if (parsed?.battery == null) {
-        void refreshBatteryForTag(device.id, tagId);
-      }
+    const parsed = parseBlueTagManufacturerData(device.manufacturerData);
+    const inferredTagId = inferTagIdFromDevice(device);
+    const serviceMatched = hasKnownRingService(device);
+    const nameMatched = looksLikeBlueTagName(device);
+    const cachedTagId = knownDeviceToTagRef.current[device.id];
+    const tagId =
+      inferredTagId ??
+      parsed?.tagId ??
+      cachedTagId ??
+      (serviceMatched || nameMatched ? deriveStableTagId(device.id || device.name || device.localName || '') : null);
 
-      setTags((prev) => {
-        const prevTag = prev[tagId];
-        const nextRssiRaw = device.rssi ?? -120;
-        const smoothedRssi = prevTag ? Math.round(prevTag.rssi * 0.7 + nextRssiRaw * 0.3) : nextRssiRaw;
-        const fallbackName = toBlueTagDisplayName(tagId);
+    if (!tagId) return;
 
-        return {
-          ...prev,
-          [tagId]: {
-            deviceId: device.id,
-            tagId,
-            name: tagNicknames[tagId] || prevTag?.name || device.name || device.localName || fallbackName,
-            rssi: smoothedRssi,
-            battery: parsed?.battery ?? prevTag?.battery ?? null,
-            counter: parsed?.counter ?? prevTag?.counter ?? null,
-            lastSeen: formatThaiTime(new Date()),
-            lastSeenMs: Date.now(),
-          },
-        };
-      });
+    lastBlueTagSeenAtRef.current = Date.now();
+    console.log('[BLE_SCAN_MATCH]', {
+      id: device.id,
+      tagId,
+      inferredTagId,
+      parsedTagId: parsed?.tagId ?? null,
+      serviceMatched,
+      nameMatched,
+      rssi: device.rssi ?? null,
+    });
+
+    knownDeviceToTagRef.current[device.id] = tagId;
+    void captureLocalTagLocation(tagId, parsed?.battery ?? prevTagBattery(tagId));
+
+    // Avoid opportunistic BLE connections during active scan; they can destabilize discovery on some Android devices.
+    if (allowBatteryProbe && parsed?.battery == null && connectedTagId.trim().toUpperCase() === tagId) {
+      void refreshBatteryForTag(device.id, tagId);
+    }
+
+    setTags((prev) => {
+      const prevTag = prev[tagId];
+      const nextRssiRaw = device.rssi ?? -120;
+      const smoothedRssi = prevTag ? Math.round(prevTag.rssi * 0.7 + nextRssiRaw * 0.3) : nextRssiRaw;
+      const fallbackName = toBlueTagDisplayName(tagId);
+
+      return {
+        ...prev,
+        [tagId]: {
+          deviceId: device.id,
+          tagId,
+          name: tagNicknames[tagId] || prevTag?.name || device.name || device.localName || fallbackName,
+          rssi: smoothedRssi,
+          battery: parsed?.battery ?? prevTag?.battery ?? null,
+          counter: parsed?.counter ?? prevTag?.counter ?? null,
+          lastSeen: formatThaiTime(new Date()),
+          lastSeenMs: Date.now(),
+        },
+      };
     });
   }
 

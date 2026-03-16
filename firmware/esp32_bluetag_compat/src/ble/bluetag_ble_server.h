@@ -2,13 +2,12 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
-#include <string>
-#include <esp_sleep.h>
 #include <BLE2902.h>
 #include <BLEAdvertising.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
+#include <string>
 
 #include "config/bluetag_config.h"
 #include "controllers/ring_controller.h"
@@ -58,9 +57,8 @@ class BlueTagBleServer {
   void restartAdvertisingNow();
   uint32_t nextBatteryUpdateIntervalMs() const;
   void noteActivity(uint32_t extendMs = BlueTagConfig::kBurstAdvertisingWindowMs);
-  bool canEnterTimedLightSleep() const;
-  void enterTimedLightSleep();
   std::string resolveWebIdHash(const String& webId) const;
+  uint32_t readBatteryMilliVolts() const;
   uint8_t readBatteryPercent() const;
   uint32_t resolveTagHash() const;
 
@@ -78,6 +76,7 @@ class BlueTagBleServer {
   bool sleepModeEnabled_ = BlueTagConfig::kSleepModeDefaultEnabled;
   bool advertisingRestartPending_ = false;
   uint8_t lastBatteryPercent_ = 0;
+  uint32_t lastBatteryMilliVolts_ = 0;
   uint32_t advCounter_ = 0;
   uint32_t nextBatterySampleAtMs_ = 0;
   uint32_t nextAdvertisingRestartAtMs_ = 0;

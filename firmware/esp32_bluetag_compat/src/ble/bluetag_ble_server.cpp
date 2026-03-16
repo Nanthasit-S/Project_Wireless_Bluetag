@@ -5,6 +5,73 @@
 
 #include "config/bluetag_config.h"
 
+namespace {
+
+float batteryDividerScale() {
+  const float top = static_cast<float>(BlueTagConfig::kBatteryDividerTopOhms);
+  const float bottom = static_cast<float>(BlueTagConfig::kBatteryDividerBottomOhms);
+  if (bottom <= 0.0f) {
+    return 1.0f;
+  }
+  return (top + bottom) / bottom;
+}
+
+uint8_t batteryPercentFromCurve(float batteryMv) {
+  struct BatteryPoint {
+    float mv;
+    uint8_t percent;
+  };
+
+  // A simple Li-ion discharge curve gives a much more believable percentage than a linear map.
+  static constexpr BatteryPoint kCurve[] = {
+      {4200.0f, 100},
+      {4150.0f, 96},
+      {4100.0f, 90},
+      {4050.0f, 84},
+      {4000.0f, 76},
+      {3950.0f, 68},
+      {3900.0f, 58},
+      {3850.0f, 48},
+      {3800.0f, 38},
+      {3750.0f, 28},
+      {3700.0f, 20},
+      {3650.0f, 14},
+      {3600.0f, 9},
+      {3550.0f, 6},
+      {3500.0f, 4},
+      {3450.0f, 2},
+      {3300.0f, 0},
+  };
+
+  if (batteryMv >= kCurve[0].mv) {
+    return 100;
+  }
+  if (batteryMv <= kCurve[sizeof(kCurve) / sizeof(kCurve[0]) - 1].mv) {
+    return 0;
+  }
+
+  for (size_t i = 0; i + 1 < sizeof(kCurve) / sizeof(kCurve[0]); ++i) {
+    const BatteryPoint upper = kCurve[i];
+    const BatteryPoint lower = kCurve[i + 1];
+    if (batteryMv > upper.mv || batteryMv < lower.mv) {
+      continue;
+    }
+
+    const float span = upper.mv - lower.mv;
+    if (span <= 0.0f) {
+      return lower.percent;
+    }
+
+    const float ratio = (batteryMv - lower.mv) / span;
+    const float percent = static_cast<float>(lower.percent) +
+                          (static_cast<float>(upper.percent - lower.percent) * ratio);
+    return static_cast<uint8_t>(constrain(static_cast<int>(percent + 0.5f), 0, 100));
+  }
+
+  return static_cast<uint8_t>(constrain(BlueTagConfig::kBatteryFallbackPercent, 0, 100));
+}
+
+}  // namespace
 BlueTagBleServer::BlueTagBleServer(RingController& ring)
     : ring_(ring), ringCharCallbacks_(*this), serverCallbacks_(*this) {}
 
@@ -208,15 +275,16 @@ void BlueTagBleServer::loadBindingState() {
   stored.trim();
   stored.toUpperCase();
   boundWebIdHash_ = stored.c_str();
-  sleepModeEnabled_ = preferences_.getBool(
-      BlueTagConfig::kSleepModeEnabledKey,
-      BlueTagConfig::kSleepModeDefaultEnabled);
+  sleepModeEnabled_ = false;
+  preferences_.putBool(BlueTagConfig::kSleepModeEnabledKey, false);
 }
 
 bool BlueTagBleServer::setSleepModeEnabled(bool enabled) {
-  sleepModeEnabled_ = enabled;
+  (void)enabled;
+  sleepModeEnabled_ = false;
   noteActivity(BlueTagConfig::kBurstAdvertisingWindowMs * 4);
-  return preferences_.putBool(BlueTagConfig::kSleepModeEnabledKey, enabled);
+  preferences_.putBool(BlueTagConfig::kSleepModeEnabledKey, false);
+  return false;
 }
 
 std::string BlueTagBleServer::resolveWebIdHash(const String& webId) const {
@@ -244,11 +312,6 @@ void BlueTagBleServer::update() {
     restartAdvertisingNow();
   }
 
-  if (canEnterTimedLightSleep() && static_cast<int32_t>(now - stayAwakeUntilMs_) >= 0) {
-    enterTimedLightSleep();
-    return;
-  }
-
   if (now < nextBatterySampleAtMs_) {
     return;
   }
@@ -263,20 +326,6 @@ uint32_t BlueTagBleServer::nextBatteryUpdateIntervalMs() const {
 
 void BlueTagBleServer::noteActivity(uint32_t extendMs) {
   stayAwakeUntilMs_ = millis() + extendMs;
-}
-
-bool BlueTagBleServer::canEnterTimedLightSleep() const {
-  return sleepModeEnabled_ && !centralConnected_ && ring_.currentMode() == RingMode::Off;
-}
-
-void BlueTagBleServer::enterTimedLightSleep() {
-  Serial.printf("[POWER] Enter light sleep for %lu ms\n", static_cast<unsigned long>(BlueTagConfig::kLightSleepIntervalMs));
-  Serial.flush();
-  BLEDevice::stopAdvertising();
-  esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(BlueTagConfig::kLightSleepIntervalMs) * 1000ULL);
-  esp_light_sleep_start();
-  noteActivity();
-  scheduleAdvertisingRestart(0);
 }
 
 BlueTagBleServer::RingCharacteristicCallbacks::RingCharacteristicCallbacks(BlueTagBleServer& parent)
@@ -327,16 +376,16 @@ void BlueTagBleServer::handleRingWrite(const std::string& value) {
   }
 
   if (modeByte == 0xA0) {
-    setSleepModeEnabled(false);
+    sleepModeEnabled_ = false;
     publishMode();
     Serial.println("[POWER] sleep mode disabled by BLE");
     return;
   }
 
   if (modeByte == 0xA1) {
-    setSleepModeEnabled(true);
+    sleepModeEnabled_ = false;
     publishMode();
-    Serial.println("[POWER] sleep mode enabled by BLE");
+    Serial.println("[POWER] sleep mode is removed; ON ignored");
     return;
   }
 
@@ -465,33 +514,70 @@ void BlueTagBleServer::publishAdvertisingPayload() {
   advertising->setScanResponseData(scanResponse);
 }
 
-uint8_t BlueTagBleServer::readBatteryPercent() const {
+uint32_t BlueTagBleServer::readBatteryMilliVolts() const {
   if (BlueTagConfig::kBatteryAdcPin < 0) {
-    return static_cast<uint8_t>(constrain(BlueTagConfig::kBatteryFallbackPercent, 0, 100));
+    const int fallbackPercent = constrain(BlueTagConfig::kBatteryFallbackPercent, 0, 100);
+    return static_cast<uint32_t>(
+        BlueTagConfig::kBatteryMvEmpty +
+        (((BlueTagConfig::kBatteryMvFull - BlueTagConfig::kBatteryMvEmpty) * fallbackPercent) / 100));
   }
 
-  int mvSum = 0;
-  int validSamples = 0;
+  for (int i = 0; i < BlueTagConfig::kBatteryWarmupReads; ++i) {
+    analogReadMilliVolts(BlueTagConfig::kBatteryAdcPin);
+    delay(BlueTagConfig::kBatterySampleDelayMs);
+  }
+
+  std::vector<int> samples;
+  samples.reserve(BlueTagConfig::kBatterySampleCount);
   for (int i = 0; i < BlueTagConfig::kBatterySampleCount; ++i) {
-    int mv = analogReadMilliVolts(BlueTagConfig::kBatteryAdcPin);
+    const int mv = analogReadMilliVolts(BlueTagConfig::kBatteryAdcPin);
     if (mv > 0) {
-      mvSum += mv;
-      validSamples += 1;
+      samples.push_back(mv);
     }
-    delay(2);
+    delay(BlueTagConfig::kBatterySampleDelayMs);
   }
 
-  if (validSamples <= 0) {
-    return static_cast<uint8_t>(constrain(BlueTagConfig::kBatteryFallbackPercent, 0, 100));
+  if (samples.empty()) {
+    const int fallbackPercent = constrain(BlueTagConfig::kBatteryFallbackPercent, 0, 100);
+    return static_cast<uint32_t>(
+        BlueTagConfig::kBatteryMvEmpty +
+        (((BlueTagConfig::kBatteryMvFull - BlueTagConfig::kBatteryMvEmpty) * fallbackPercent) / 100));
   }
 
-  const float measuredMv = static_cast<float>(mvSum) / static_cast<float>(validSamples);
-  const float batteryMv = measuredMv * BlueTagConfig::kBatteryAdcScale;
-  const float ratio =
-      (batteryMv - static_cast<float>(BlueTagConfig::kBatteryMvEmpty)) /
-      static_cast<float>(BlueTagConfig::kBatteryMvFull - BlueTagConfig::kBatteryMvEmpty);
-  const int percent = static_cast<int>(ratio * 100.0f + 0.5f);
-  return static_cast<uint8_t>(constrain(percent, 0, 100));
+  std::sort(samples.begin(), samples.end());
+
+  int trimmedSum = 0;
+  int trimmedCount = 0;
+  size_t startIndex = 0;
+  size_t endIndex = samples.size();
+  if (samples.size() >= 7) {
+    startIndex = 2;
+    endIndex = samples.size() - 2;
+  } else if (samples.size() >= 5) {
+    startIndex = 1;
+    endIndex = samples.size() - 1;
+  }
+
+  for (size_t i = startIndex; i < endIndex; ++i) {
+    trimmedSum += samples[i];
+    trimmedCount += 1;
+  }
+
+  if (trimmedCount <= 0) {
+    const int fallbackPercent = constrain(BlueTagConfig::kBatteryFallbackPercent, 0, 100);
+    return static_cast<uint32_t>(
+        BlueTagConfig::kBatteryMvEmpty +
+        (((BlueTagConfig::kBatteryMvFull - BlueTagConfig::kBatteryMvEmpty) * fallbackPercent) / 100));
+  }
+
+  const float measuredMv = static_cast<float>(trimmedSum) / static_cast<float>(trimmedCount);
+  const float batteryMv =
+      (measuredMv * batteryDividerScale()) + static_cast<float>(BlueTagConfig::kBatteryAdcOffsetMv);
+  return static_cast<uint32_t>(std::max(0, static_cast<int>(batteryMv + 0.5f)));
+}
+uint8_t BlueTagBleServer::readBatteryPercent() const {
+  const uint32_t batteryMv = readBatteryMilliVolts();
+  return batteryPercentFromCurve(static_cast<float>(batteryMv));
 }
 
 void BlueTagBleServer::publishBattery(bool notify) {
@@ -499,12 +585,14 @@ void BlueTagBleServer::publishBattery(bool notify) {
     return;
   }
 
-  const uint8_t batteryPercent = readBatteryPercent();
-  if (batteryPercent == lastBatteryPercent_ && !notify) {
+  const uint32_t batteryMv = readBatteryMilliVolts();
+  const uint8_t batteryPercent = batteryPercentFromCurve(static_cast<float>(batteryMv));
+  if (batteryPercent == lastBatteryPercent_ && batteryMv == lastBatteryMilliVolts_ && !notify) {
     return;
   }
 
   lastBatteryPercent_ = batteryPercent;
+  lastBatteryMilliVolts_ = batteryMv;
   batteryChar_->setValue(&lastBatteryPercent_, 1);
   publishAdvertisingPayload();
   if (notify && centralConnected_) {
@@ -519,6 +607,7 @@ void BlueTagBleServer::printSerialSummary(Stream& stream) const {
   stream.printf("LOCK_STATE=%s\n", boundWebIdHash_.empty() ? "UNBOUND" : "LOCKED");
   stream.printf("SLEEP_MODE=%s\n", sleepModeEnabled_ ? "ON" : "OFF");
   stream.printf("BATTERY=%u\n", static_cast<unsigned>(lastBatteryPercent_));
+  stream.printf("BATTERY_MV=%lu\n", static_cast<unsigned long>(lastBatteryMilliVolts_));
   stream.printf("DEVICE_NAME=%s\n", BlueTagConfig::kLegacyAdvertisedName);
   stream.printf("SERVICE_1910=%s\n", BlueTagConfig::kServiceUuid);
   stream.printf("CHAR_2B10=%s\n", BlueTagConfig::kRingCharPrimaryUuid);

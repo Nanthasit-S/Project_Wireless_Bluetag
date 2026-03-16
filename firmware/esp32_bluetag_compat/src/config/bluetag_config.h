@@ -22,8 +22,7 @@ static constexpr const char* kSleepModeEnabledKey = "sleep_enabled";
 static constexpr uint16_t kAdvertisingMinIntervalUnits = 400;   // 250 ms
 static constexpr uint16_t kAdvertisingMaxIntervalUnits = 560;   // 350 ms
 static constexpr uint32_t kBurstAdvertisingWindowMs = 120000;
-static constexpr uint32_t kLightSleepIntervalMs = 800;
-static constexpr bool kSleepModeDefaultEnabled = true;
+static constexpr bool kSleepModeDefaultEnabled = false;
 
 static constexpr int kBuzzerPinPrimary = 2;
 static constexpr int kBuzzerPinSecondary = -1;
@@ -36,15 +35,20 @@ static constexpr bool kUseActiveBuzzer = true;
 static constexpr bool kBuzzerActiveLow = true;
 static constexpr uint32_t kRingCommandLeaseMs = 3200;
 
-// Battery reporting:
-// - Set kBatteryAdcPin to your VBAT ADC pin (or keep -1 to use fallback percent).
-// - If there is a divider on VBAT, set kBatteryAdcScale accordingly (e.g. 2.0f).
-static constexpr int kBatteryAdcPin = -1;
-static constexpr float kBatteryAdcScale = 2.0f;
+// Battery reporting with resistor divider:
+// BAT+ -> kBatteryDividerTopOhms -> ADC pin -> kBatteryDividerBottomOhms -> GND
+// Current board wiring uses 100k / 100k with a 0.1uF cap from ADC pin to GND.
+static constexpr int kBatteryAdcPin = 3;
+static constexpr int kBatteryAdcAttenuationDb = 11;
+static constexpr int kBatteryDividerTopOhms = 100000;
+static constexpr int kBatteryDividerBottomOhms = 100000;
+static constexpr int kBatteryAdcOffsetMv = 110;
 static constexpr int kBatteryMvEmpty = 3300;
 static constexpr int kBatteryMvFull = 4200;
 static constexpr int kBatteryFallbackPercent = 100;
+static constexpr int kBatteryWarmupReads = 4;
 static constexpr int kBatterySampleCount = 4;
+static constexpr int kBatterySampleDelayMs = 6;
 static constexpr uint32_t kBatteryUpdateIntervalIdleMs = 60000;
 static constexpr uint32_t kBatteryUpdateIntervalConnectedMs = 15000;
 }  // namespace BlueTagConfig
